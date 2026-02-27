@@ -1,0 +1,65 @@
+services:
+  pg-server-transcriptions:
+    image: postgres:16-alpine
+    container_name: pg-server-transcriptions
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-super_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pw314159!}
+      POSTGRES_DB: ${POSTGRES_DB:-transcriptions}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-super_admin} -d ${POSTGRES_DB:-transcriptions}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - transcription-shared
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: infra-database-mgmt
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@localhost.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PGPASSFILE: /pgpass
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./infra/pgadmin/servers.json:/pgadmin4/servers.json:ro
+      - ./infra/pgadmin/pgpass:/pgpass:ro
+    networks:
+      - transcription-shared
+
+  storage:
+    image: mcr.microsoft.com/azure-storage/azurite
+    container_name: infra-storage
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
+    volumes:
+      - storage_data:/data
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 -l /data --skipApiVersionCheck
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:10000', (r) => process.exit(0)).on('error', () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - transcription-shared
+
+networks:
+  transcription-shared:
+    external: true
+
+volumes:
+  postgres_data:
+  pgadmin_data:
+  storage_data:

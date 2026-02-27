@@ -1,0 +1,9 @@
+**.venv**
+**pycache**
+tmp/*.pkl
+tmp/*
+**settings.local.json**
+**pycache**
+**local.secrets**
+main.ipynb
+sample_data/*

@@ -1,0 +1,37 @@
+#api framework
+fastapi
+uvicorn
+python-multipart
+
+#database packages
+SQLAlchemy
+sqlalchemy[asyncio]
+alembic
+urllib3
+
+#it totally does work....woot woot
+asyncpg
+psycopg2-binary
+pyodbc
+
+#data ops
+pandas
+
+# Swagger Authorization Flow
+fastapi-azure-auth
+
+#azure queue, blob and functions
+azure-core
+azure-storage-queue
+azure-storage-blob
+azure-identity
+azure-keyvault
+
+#unit testing
+pytest
+pytest-cov
+
+# logging to app insights
+opencensus-ext-azure
+
+apscheduler

@@ -1,0 +1,13 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "pg-server-transcriptions",
+      "Group": "Servers",
+      "Host": "pg-server-transcriptions",
+      "Port": 5432,
+      "MaintenanceDB": "transcriptions",
+      "Username": "super_admin",
+      "SSLMode": "prefer"
+    }
+  }
+}
