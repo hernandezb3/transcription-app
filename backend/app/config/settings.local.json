@@ -1,0 +1,69 @@
+{
+  "BuildInformation": {
+    "init_time": "2025-12-18T12:36:15",
+    "build_number": "0",
+    "build_id": "0",
+    "build_user": "smitty@spongebob.org",
+    "build_url": ""
+  },
+  "RuntimeSettings": {
+    "CORS": [
+      "http://localhost:3000"
+    ],
+    "UAIClientId": "",
+    "AppURL": ""
+
+  },
+  "AuthorizationProvider": {
+    "ServiceProvider": "AzureAD",
+    "Settings": {
+      "AppRegistrationTenantId": "",
+      "AppRegistrationClientId": "",
+      "AppRegistrationClientSecret": "<APP_REGISTRATION_CLIENT_SECRET_PLACEHOLDER>",
+      "Scope": {
+        "Path": "api://na/Full",
+        "Name": "Full"
+      }
+    }
+  },
+  "ApplicationLogging": {
+    "ServiceProvider": "Console",
+    "Settings": {
+      "ConnectionString": "<APPLICATION_INSIGHTS_CONNECTION_STRING_PLACEHOLDER>"
+    }
+  },
+  "SecretManager": {
+    "ServiceProvider": "AzureKeyVault",
+    "Settings": {
+      "URL": "https://mytempvault.com",
+      "Secrets": [
+        {
+          "secret": "app_key",
+          "mapping": "RuntimeSettings.AppKey",
+          "content_type": "string"
+        }
+      ]
+    }
+  },
+
+  "TransactionalDatabase": {
+    "ServiceProvider": "SQL",
+    "Settings": {
+      "Type": "PostgresSQL",
+      "ConnectionString": "postgresql+asyncpg://super_admin:pw314159!@localhost:5433/transcriptions",
+      "AuthenticationType": "UsernamePassword",
+      "BaseSchema": "public"
+    }
+  },
+
+  "Storage": {
+    "ServiceProvider": "Azurite",
+    "Settings": {
+      "ContainerName": "00-files",
+      "ConnectionString": "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=TEMP_KEY_314159;BlobEndpoint=http://localhost:10000/devstoreaccount1;QueueEndpoint=http://localhost:10001/devstoreaccount1;",
+      "AccountName": "devstoreaccount1",
+      "Url": "http://localhost:10000/devstoreaccount1",
+      "PoolSize": 5
+    }
+  }
+} 
