@@ -10,7 +10,7 @@ class UserRepository:
     def __init__(self):
         self.database = DatabaseFactory()
 
-    async def list_users(self, limit: int):
+    async def list_users(self, limit: int, offset: int = 0):
         query = sqlalchemy.select(
             UsersT.id, 
             UsersT.unique_id, 
@@ -19,10 +19,17 @@ class UserRepository:
             UsersT.display_name, 
             UsersT.first_name, 
             UsersT.last_name,
-            UsersT.created
-        ).limit(limit)
+            UsersT.active,
+            UsersT.created,
+            UsersT.modified
+        ).order_by(UsersT.id.asc()).limit(limit).offset(offset)
         result = await self.database.aread(query)
-        return result   
+        return result
+
+    async def count_users(self):
+        query = sqlalchemy.select(sqlalchemy.func.count(UsersT.id).label("total"))
+        result = await self.database.aread(query)
+        return result
 
     async def aget_user(self, user_id: int):
         query = sqlalchemy.select(

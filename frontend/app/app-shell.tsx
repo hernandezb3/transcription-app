@@ -45,7 +45,7 @@ export default function AppShell({ children }: AppShellProps) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+    <div className="flex h-screen flex-col overflow-hidden bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <header className="sticky top-0 z-30 h-16 bg-white dark:bg-zinc-900">
         <div className="flex h-full items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-3">
@@ -147,7 +147,7 @@ export default function AppShell({ children }: AppShellProps) {
       </header>
       <div className="sticky top-16 z-30 h-px bg-zinc-200/90 dark:bg-zinc-800/90" />
 
-      <div className="relative flex min-h-[calc(100vh-4rem)] overflow-hidden">
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <div
           aria-hidden="true"
           className={`fixed inset-0 z-50 bg-black/35 backdrop-blur-[1px] transition-opacity duration-300 ease-out ${
@@ -218,7 +218,7 @@ export default function AppShell({ children }: AppShellProps) {
           </nav>
         </aside>
 
-        <main className="flex-1 p-6">{children}</main>
+        <main className="flex-1 overflow-hidden p-6">{children}</main>
       </div>
     </div>
   );

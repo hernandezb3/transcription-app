@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, Query
 from repositories.user.controller import UserRepository
 from typing import Optional
 from data_models.user import UserCreate, UserUpdate
+import math
 
 router = APIRouter(prefix="/users")
 
@@ -28,7 +29,30 @@ async def delete_user(user_id: int):
     return result
 
 @router.get("/")
-async def list_users(limit: Optional[int] = 10):
-    result = await UserRepository().list_users(limit)
-    data = result.get("data")
-    return data
+async def list_users(
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=10, ge=1, le=100),
+):
+    offset = (page - 1) * limit
+
+    repository = UserRepository()
+    result = await repository.list_users(limit=limit, offset=offset)
+    count_result = await repository.count_users()
+
+    data = result.get("data") if isinstance(result, dict) else []
+    total = 0
+
+    if isinstance(count_result, dict):
+        count_data = count_result.get("data", [])
+        if count_data and isinstance(count_data[0], dict):
+            total = int(count_data[0].get("total", 0) or 0)
+
+    total_pages = math.ceil(total / limit) if total > 0 else 1
+
+    return {
+        "items": data,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "total_pages": total_pages,
+    }
