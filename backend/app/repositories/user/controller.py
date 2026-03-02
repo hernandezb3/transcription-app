@@ -4,6 +4,7 @@ from infrastructure.databases.factory import DatabaseFactory
 
 from db_models.user import UsersT
 from data_models.user import UserCreate, UserUpdate
+from mappers.user_mapper import UserMapper
 
 class UserRepository:
     def __init__(self):
@@ -40,18 +41,18 @@ class UserRepository:
         return result
     
     async def create_user(self, user: UserCreate):
-        user_data = user.model_dump(exclude_unset=True)
+        user_data = UserMapper.to_create_values(user)
         stmt = sqlalchemy.insert(UsersT).values(user_data)
         result = await self.database.acreate(stmt)
         return result
     
     async def update_user(self, user: UserUpdate,user_id: int):
-        user_data = user.model_dump(exclude_unset=True)
-        stmt = sqlalchemy.update(UsersT).where(UsersT.Id == user_id).values(user_data)
+        user_data = UserMapper.to_update_values(user)
+        stmt = sqlalchemy.update(UsersT).where(UsersT.id == user_id).values(user_data)
         result = await self.database.aupdate(stmt)
         return result
     
     async def delete_user(self, user_id: int):
-        stmt = sqlalchemy.delete(UsersT).where(UsersT.Id == user_id)
+        stmt = sqlalchemy.delete(UsersT).where(UsersT.id == user_id)
         result = await self.database.adelete(stmt)
         return result

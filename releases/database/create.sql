@@ -6,10 +6,10 @@ CREATE TABLE public.users_t (
     first_name VARCHAR(200),
     last_name VARCHAR(100),
     display_name VARCHAR(200),
-    created TIMESTAMP WITHOUT TIME ZONE NOT NULL,
-    created_by INTEGER NOT NULL,
-    modified TIMESTAMP WITHOUT TIME ZONE NOT NULL,
-    modified_by INTEGER NOT NULL,
+    created TIMESTAMP WITHOUT TIME ZONE NULL,
+    created_by INTEGER NULL,
+    modified TIMESTAMP WITHOUT TIME ZONE NULL,
+    modified_by INTEGER  NULL,
     active INTEGER NOT NULL DEFAULT 1
 );
 
