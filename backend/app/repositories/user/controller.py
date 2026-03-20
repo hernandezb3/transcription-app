@@ -1,10 +1,10 @@
 import sqlalchemy
 
-from infrastructure.databases.factory import DatabaseFactory
+from app.infrastructure.databases.factory import DatabaseFactory
 
-from db_models.user import UsersT
-from data_models.user import UserCreate, UserUpdate
-from mappers.user_mapper import UserMapper
+from app.db_models.user import UsersT
+from app.data_models.user import UserCreate, UserUpdate
+from app.mappers.user_mapper import UserMapper
 
 class UserRepository:
     def __init__(self):

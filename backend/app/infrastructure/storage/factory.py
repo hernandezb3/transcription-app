@@ -1,6 +1,6 @@
-from infrastructure.storage.azure_storage import AzureBlobStorageFactory
-from config.app_settings import SettingsConfig
-from config.app_logging import AppLogging
+from app.infrastructure.storage.azure_storage import AzureBlobStorageFactory
+from app.config.app_settings import SettingsConfig
+from app.config.app_logging import AppLogging
 
 class StorageFactory:
     _instance = None

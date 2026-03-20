@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
-from config.app_settings import SettingsConfig
+from app.config.app_settings import SettingsConfig
 
 router = APIRouter()
 settings = SettingsConfig().settings.BuildInformation

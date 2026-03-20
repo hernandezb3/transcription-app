@@ -3,8 +3,8 @@ from datetime import datetime, timedelta, timezone
 
 from queue import Queue
 
-from config.app_settings import SettingsConfig
-from config.app_logging import AppLogging
+from app.config.app_settings import SettingsConfig
+from app.config.app_logging import AppLogging
 
 class AzureBlobStorageFactory:
     _instance = None

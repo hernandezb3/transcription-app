@@ -4,7 +4,7 @@ import logging
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from config.data_model import AppConfig
+from app.config.data_model import AppConfig
 
 class SettingsConfig:
     _instance = None
@@ -39,7 +39,7 @@ class SettingsConfig:
 
     def get_base_settings(self):
         
-        settings_file = f'config/settings.{self.environment}.json'
+        settings_file = f'app/config/settings.{self.environment}.json'
         
         try:
             with open(settings_file, 'r') as file:

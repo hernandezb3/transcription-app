@@ -9,6 +9,12 @@ type ModuleItem = {
 
 const modules: ModuleItem[] = [
   {
+    title: "Transcriptions",
+    description: "View, edit, and tag transcript sections. Edit speaker labels, refine text, and play back segments.",
+    href: "/transcriptions/1",
+    cta: "Open Transcriptions",
+  },
+  {
     title: "Users",
     description: "View and manage team members, usernames, and account status.",
     href: "/users",

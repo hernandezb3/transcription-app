@@ -1,5 +1,5 @@
-from infrastructure.databases.sql import SQLFactory
-from config.app_settings import SettingsConfig
+from app.config.app_settings import SettingsConfig
+from app.infrastructure.databases.sql import SQLFactory
 
 class DatabaseFactory:
 

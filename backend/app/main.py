@@ -4,12 +4,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 #importing routers
-from api_routers.home import router as home_router
-from api_routers.user import router as user_router
+from app.api_routers.home import router as home_router
+from app.api_routers.user import router as user_router
+from app.api_routers.transcriptions.route import router as transcription_router
 
 # settings and logging
-from config.app_settings import SettingsConfig
-from config.app_logging import AppLogging
+from app.config.app_settings import SettingsConfig
+from app.config.app_logging import AppLogging
 
 logger = AppLogging().logger
 settings = SettingsConfig().settings
@@ -33,3 +34,4 @@ app.add_middleware(
 # including routes
 app.include_router(home_router, tags=["Home"])
 app.include_router(user_router, tags=["User Management"])
+app.include_router(transcription_router, tags=["Transcription Management"])

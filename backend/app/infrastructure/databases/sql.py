@@ -8,8 +8,8 @@ from azure.identity import DefaultAzureCredential
 from sqlalchemy import event
 from sqlalchemy import text
 
-from config.app_logging import AppLogging
-from config.app_settings import SettingsConfig
+from app.config.app_logging import AppLogging
+from app.config.app_settings import SettingsConfig
 
 class SQLFactory:
 

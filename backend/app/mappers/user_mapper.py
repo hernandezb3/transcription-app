@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from data_models.user import UserCreate, UserUpdate
+from app.data_models.user import UserCreate, UserUpdate
 
 class UserMapper:
     @staticmethod

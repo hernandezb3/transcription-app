@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Header, Query
-from repositories.user.controller import UserRepository
 from typing import Optional
-from data_models.user import UserCreate, UserUpdate
 import math
+
+from app.data_models.user import UserCreate, UserUpdate
+from app.repositories.user.controller import UserRepository
 
 router = APIRouter(prefix="/users")
 

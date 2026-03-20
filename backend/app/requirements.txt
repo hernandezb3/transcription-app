@@ -35,3 +35,8 @@ pytest-cov
 opencensus-ext-azure
 
 apscheduler
+
+alembic
+
+psycopg[binary]
+psycopg

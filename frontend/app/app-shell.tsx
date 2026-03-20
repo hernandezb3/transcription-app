@@ -12,6 +12,7 @@ type AppShellProps = {
 
 const navItems = [
   { label: "Landing Page", href: "/" },
+  { label: "Transcriptions", href: "/transcriptions/1" },
   { label: "Users", href: "/users" },
   { label: "Settings", href: "/settings" },
 ];
@@ -24,7 +25,8 @@ export default function AppShell({ children }: AppShellProps) {
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const pathname = usePathname();
   const currentPageTitle =
-    navItems.find((item) => item.href === pathname)?.label ?? defaultPageTitle;
+    navItems.find((item) => item.href === pathname)?.label ??
+    (pathname.startsWith("/transcriptions") ? "Transcript Editor" : defaultPageTitle);
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -147,7 +149,7 @@ export default function AppShell({ children }: AppShellProps) {
       </header>
       <div className="sticky top-16 z-30 h-px bg-zinc-200/90 dark:bg-zinc-800/90" />
 
-        <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <div className="relative flex min-h-0 flex-1">
         <div
           aria-hidden="true"
           className={`fixed inset-0 z-50 bg-black/35 backdrop-blur-[1px] transition-opacity duration-300 ease-out ${
@@ -201,24 +203,29 @@ export default function AppShell({ children }: AppShellProps) {
           </div>
 
           <nav className="space-y-1 text-sm">
-            {navItems.map((item) => (
-              <Link
-                key={item.label}
-                href={item.href}
-                className={`block cursor-pointer rounded-md px-3 py-2 transition-colors ${
-                  pathname === item.href
-                    ? "bg-orange-50 text-orange-700 ring-1 ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-400/30"
-                    : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                }`}
-                onClick={() => setIsSidebarOpen(false)}
-              >
-                {item.label}
-              </Link>
-            ))}
+            {navItems.map((item) => {
+              const isActive =
+                pathname === item.href || pathname.startsWith(item.href + "/") ||
+                (item.href !== "/" && pathname.startsWith(item.href.replace(/\/\d+$/, "")));
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  className={`block cursor-pointer rounded-md px-3 py-2 transition-colors ${
+                    isActive
+                      ? "bg-orange-50 text-orange-700 ring-1 ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-400/30"
+                      : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  }`}
+                  onClick={() => setIsSidebarOpen(false)}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
           </nav>
         </aside>
 
-        <main className="flex-1 overflow-hidden p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>
   );
