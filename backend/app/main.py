@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api_routers.home import router as home_router
 from app.api_routers.user import router as user_router
 from app.api_routers.transcriptions.route import router as transcription_router
+from app.api_routers.transcript_details.route import router as transcript_details_router
 
 # settings and logging
 from app.config.app_settings import SettingsConfig
@@ -35,3 +36,4 @@ app.add_middleware(
 app.include_router(home_router, tags=["Home"])
 app.include_router(user_router, tags=["User Management"])
 app.include_router(transcription_router, tags=["Transcription Management"])
+app.include_router(transcript_details_router, tags=["Transcript Details"])

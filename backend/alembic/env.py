@@ -21,6 +21,7 @@ if config.config_file_name is not None:
 from app.db_models.base import Base
 import app.db_models.user  # noqa: F401
 import app.db_models.transcription.transcription  # noqa: F401
+import app.db_models.transcription.metadata  # noqa: F401
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
