@@ -115,6 +115,7 @@ function HighlightText({
 function InlineEdit({
   value,
   onSave,
+  onEditStart,
   multiline = false,
   className = "",
   highlight = "",
@@ -123,6 +124,7 @@ function InlineEdit({
 }: {
   value: string;
   onSave: (v: string) => void;
+  onEditStart?: () => void;
   multiline?: boolean;
   className?: string;
   highlight?: string;
@@ -164,7 +166,7 @@ function InlineEdit({
       <button
         type="button"
         className={`cursor-pointer rounded px-1.5 py-0.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${className}`}
-        onClick={() => setEditing(true)}
+        onClick={() => { onEditStart?.(); setEditing(true); }}
         title="Click to edit"
       >
         {value ? <HighlightText text={value} query={highlight} matchOffset={matchOffset} activeMatchIndex={activeMatchIndex} /> : <span className="italic text-zinc-400">empty</span>}
@@ -483,14 +485,24 @@ function computeWordDiff(original: string, edited: string): DiffSegment[] {
 function DiffModal({
   section,
   onClose,
+  onSave,
 }: {
   section: TranscriptSection;
   onClose: () => void;
+  onSave: (value: string) => void;
 }) {
   const original = section.original_text ?? "";
-  const edited = section.edited_text ?? original;
-  const hasChanges = original !== edited;
-  const segments = hasChanges ? computeWordDiff(original, edited) : [];
+  const [draft, setDraft] = useState(section.edited_text ?? original);
+  const [saving, setSaving] = useState(false);
+  const hasChanges = original !== draft;
+  const segments = hasChanges ? computeWordDiff(original, draft) : [];
+  const isDirty = draft !== (section.edited_text ?? original);
+
+  const handleSave = async () => {
+    setSaving(true);
+    onSave(draft);
+    setSaving(false);
+  };
 
   // Close on Escape
   useEffect(() => {
@@ -516,7 +528,7 @@ function DiffModal({
             </div>
             <div>
               <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">View Differences</h3>
-              <p className="text-xs text-zinc-400">Section §{section.section_id} · {section.speaker ?? "Unknown"}</p>
+              <p className="text-xs text-zinc-400">{section.speaker ?? "Unknown"}</p>
             </div>
           </div>
           <button
@@ -545,18 +557,6 @@ function DiffModal({
             </div>
           ) : (
             <div className="space-y-5">
-              {/* Legend */}
-              <div className="flex items-center gap-4 text-xs font-medium">
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="inline-block h-3 w-3 rounded-sm bg-red-100 ring-1 ring-red-200 dark:bg-red-500/20 dark:ring-red-500/30" />
-                  <span className="text-zinc-500">Removed</span>
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="inline-block h-3 w-3 rounded-sm bg-emerald-100 ring-1 ring-emerald-200 dark:bg-emerald-500/20 dark:ring-emerald-500/30" />
-                  <span className="text-zinc-500">Added</span>
-                </span>
-              </div>
-
               {/* Diff output */}
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-5 py-4 text-sm leading-relaxed dark:border-zinc-700 dark:bg-zinc-800/60">
                 {segments.map((seg, idx) => {
@@ -580,39 +580,54 @@ function DiffModal({
 
               {/* Side‑by‑side panels */}
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
+                <div className="flex flex-col gap-1.5">
                   <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600" />
                     Original
                   </p>
-                  <p className="rounded-xl bg-zinc-100 px-4 py-3 text-sm leading-relaxed text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                  <p className="flex-1 rounded-xl bg-zinc-100 px-4 py-3 text-sm leading-relaxed text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
                     {original || <span className="italic text-zinc-300">empty</span>}
                   </p>
                 </div>
-                <div className="space-y-1.5">
+                <div className="flex flex-col gap-1.5">
                   <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-400" />
-                    Edited
+                    Modified
                   </p>
-                  <p className="rounded-xl bg-zinc-100 px-4 py-3 text-sm leading-relaxed text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
-                    {edited || <span className="italic text-zinc-300">empty</span>}
-                  </p>
+                  <textarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    rows={4}
+                    className="flex-1 resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm leading-relaxed text-zinc-600 transition focus:border-orange-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-orange-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:focus:border-orange-500/50 dark:focus:bg-zinc-900 dark:focus:ring-orange-500/20"
+                    placeholder="Edit the text…"
+                  />
                 </div>
               </div>
+
+              {/* Save button */}
+              {isDirty && (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="cursor-pointer inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-orange-500/20 transition hover:shadow-lg hover:shadow-orange-500/30 hover:brightness-110 active:scale-[0.98] disabled:opacity-50"
+                  >
+                    {saving ? (
+                      <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+                        <path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
+                      </svg>
+                    )}
+                    Save changes
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* footer */}
-        <div className="flex justify-end border-t border-zinc-100 px-6 py-3 dark:border-zinc-800">
-          <button
-            type="button"
-            onClick={onClose}
-            className="cursor-pointer rounded-xl bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-          >
-            Close
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -926,6 +941,10 @@ export default function TranscriptEditorPage() {
   const playTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [volume, setVolume] = useState(80);
   const [isMuted, setIsMuted] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const playbackSpeedRef = useRef(1);
+  const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
+  const speedMenuRef = useRef<HTMLDivElement>(null);
 
   const [filterSpeaker, setFilterSpeaker] = useState("");
   const [filterTag, setFilterTag] = useState("");
@@ -935,6 +954,7 @@ export default function TranscriptEditorPage() {
   const [comments, setComments] = useState<TranscriptComment[]>([]);
   const [loadingComments, setLoadingComments] = useState(true);
   const [commentSectionId, setCommentSectionId] = useState<number | null>(null);
+  const [sidebarPanel, setSidebarPanel] = useState<{ sectionId: number; panel: "notes" | "tags" | "edits" } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
@@ -1081,16 +1101,50 @@ export default function TranscriptEditorPage() {
     setIsPlaying(true);
     playTimerRef.current = setInterval(() => {
       setPlayerTime((prev) => {
+        const increment = 0.25 * playbackSpeedRef.current;
         if (prev >= totalDuration) {
           clearInterval(playTimerRef.current!);
           playTimerRef.current = null;
           setIsPlaying(false);
           return totalDuration;
         }
-        return prev + 0.25;
+        return prev + increment;
       });
     }, 250);
   }, [totalDuration]);
+
+  // Keep the ref in sync and restart timer when speed changes during playback
+  useEffect(() => {
+    playbackSpeedRef.current = playbackSpeed;
+    if (isPlaying) {
+      // Restart the interval with the new speed
+      if (playTimerRef.current) clearInterval(playTimerRef.current);
+      playTimerRef.current = setInterval(() => {
+        setPlayerTime((prev) => {
+          const increment = 0.25 * playbackSpeedRef.current;
+          if (prev >= totalDuration) {
+            clearInterval(playTimerRef.current!);
+            playTimerRef.current = null;
+            setIsPlaying(false);
+            return totalDuration;
+          }
+          return prev + increment;
+        });
+      }, 250);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playbackSpeed]);
+
+  // Close speed menu on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (speedMenuRef.current && !speedMenuRef.current.contains(e.target as Node)) {
+        setSpeedMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const pausePlayback = useCallback(() => {
     if (playTimerRef.current) clearInterval(playTimerRef.current);
@@ -1149,6 +1203,28 @@ export default function TranscriptEditorPage() {
       if (playTimerRef.current) clearInterval(playTimerRef.current);
     };
   }, []);
+
+  // Global keyboard shortcuts: Space = play/pause, Left/Right arrows = ±5s
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent) => {
+      // Don't intercept when the user is typing in an input, textarea, or contentEditable
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        togglePlayback();
+      } else if (e.code === "ArrowLeft") {
+        e.preventDefault();
+        seekTo(playerTime - 5);
+      } else if (e.code === "ArrowRight") {
+        e.preventDefault();
+        seekTo(playerTime + 5);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [togglePlayback, seekTo, playerTime]);
 
   /* ---------- Derived data ---------- */
 
@@ -1570,6 +1646,46 @@ export default function TranscriptEditorPage() {
                 {formatSecondsToTime(totalDuration)}
               </span>
 
+              {/* Speed selector */}
+              <div ref={speedMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setSpeedMenuOpen(!speedMenuOpen)}
+                  className={`cursor-pointer rounded-lg px-2 py-1 text-[11px] font-bold tabular-nums transition-all ${
+                    playbackSpeed !== 1
+                      ? "bg-orange-100 text-orange-600 hover:bg-orange-200 dark:bg-orange-500/15 dark:text-orange-400 dark:hover:bg-orange-500/25"
+                      : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
+                  }`}
+                  title="Playback speed"
+                >
+                  {playbackSpeed}x
+                </button>
+                {speedMenuOpen && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+                    {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
+                      <button
+                        key={speed}
+                        type="button"
+                        onClick={() => { setPlaybackSpeed(speed); setSpeedMenuOpen(false); }}
+                        className={`cursor-pointer flex w-full items-center gap-2 px-4 py-1.5 text-xs font-semibold tabular-nums transition-colors ${
+                          playbackSpeed === speed
+                            ? "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400"
+                            : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                        }`}
+                      >
+                        {playbackSpeed === speed && (
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 text-orange-500">
+                            <path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
+                          </svg>
+                        )}
+                        {playbackSpeed !== speed && <span className="w-3" />}
+                        {speed}x
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="h-4 w-px bg-zinc-200 dark:bg-zinc-700" />
 
               {displaySection ? (
@@ -1698,115 +1814,192 @@ export default function TranscriptEditorPage() {
 
                 {/* saving indicator */}
                 {isSaving && (
-                  <div className="absolute right-14 top-4 flex items-center gap-2 rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-600 dark:bg-orange-500/10 dark:text-orange-400">
+                  <div className="absolute left-1/2 -translate-x-1/2 top-4 z-10 flex items-center gap-2 rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-600 dark:bg-orange-500/10 dark:text-orange-400">
                     <div className="h-3 w-3 animate-spin rounded-full border-2 border-orange-400 border-t-transparent" />
                     Saving…
                   </div>
                 )}
 
-                {/* action buttons (top-right) */}
-                <div className="absolute right-3 top-3 flex items-center gap-1.5">
-                  {/* diff / view changes */}
-                  <button
-                    type="button"
-                    onClick={() => setDiffSectionId(section.id)}
-                    className={`cursor-pointer inline-flex items-center justify-center rounded-lg p-1.5 transition-all ${
-                      (section.edited_text ?? null) !== null && section.edited_text !== section.original_text
-                        ? "bg-amber-100 text-amber-600 hover:bg-amber-200 dark:bg-amber-500/15 dark:text-amber-400 dark:hover:bg-amber-500/25"
-                        : "bg-zinc-100 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600 dark:bg-zinc-800 dark:text-zinc-500 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
-                    }`}
-                    aria-label="View changes"
-                    title={(section.edited_text ?? null) !== null && section.edited_text !== section.original_text ? "View changes" : "Compare"}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
-                      <path d="M8 1a.75.75 0 0 1 .75.75v1.5h1.5a.75.75 0 0 1 0 1.5h-1.5v1.5a.75.75 0 0 1-1.5 0v-1.5h-1.5a.75.75 0 0 1 0-1.5h1.5v-1.5A.75.75 0 0 1 8 1ZM3 9.5a.75.75 0 0 1 .75-.75h8.5a.75.75 0 0 1 0 1.5h-8.5A.75.75 0 0 1 3 9.5ZM3.75 12a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5Z" />
-                    </svg>
-                  </button>
+                <div className="flex">
+                  {/* ── Left: transcript content ── */}
+                  <div className="flex-1 min-w-0 p-3.5 pl-5">
+                    {/* speaker + timestamps */}
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className={`flex h-6 w-6 items-center justify-center rounded-full text-[9px] font-bold ring-2 ${color.bg} ${color.text} ${color.ring}`}>
+                          {getSpeakerInitials(section.speaker)}
+                        </div>
+                        <InlineEdit
+                          value={section.speaker ?? ""}
+                          onSave={(v) => saveField(section.id, "speaker", v)}
+                          onEditStart={pausePlayback}
+                          className="text-xs font-semibold text-zinc-900 dark:text-zinc-100"
+                        />
+                      </div>
 
-                  {/* comments */}
-                  <button
-                    type="button"
-                    onClick={() => setCommentSectionId(commentSectionId === section.section_id ? null : section.section_id)}
-                    className={`cursor-pointer inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all ${
-                      commentSectionId === section.section_id
-                        ? "bg-sky-500 text-white shadow-md shadow-sky-500/30 ring-2 ring-sky-300 dark:bg-sky-500 dark:ring-sky-400/40"
-                        : "bg-sky-100 text-sky-600 hover:bg-sky-200 hover:text-sky-700 dark:bg-sky-500/15 dark:text-sky-400 dark:hover:bg-sky-500/25 dark:hover:text-sky-300"
-                    }`}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
-                      <path fillRule="evenodd" d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317 .713 2.435 0 3.277 0 4.26v4.48ZM5 6.5a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 6.5Zm.75 1.75a.75.75 0 0 0 0 1.5h2.5a.75.75 0 0 0 0-1.5h-2.5Z" clipRule="evenodd" />
-                    </svg>
-                    {comments.filter((c) => c.section_id === section.section_id).length}
-                  </button>
-
-                  {commentSectionId === section.section_id && (
-                    <CommentPopover
-                      transcriptId={transcriptId}
-                      sectionId={section.section_id}
-                      comments={comments}
-                      loadingComments={loadingComments}
-                      onCommentAdded={(silent?: boolean) => fetchComments(silent)}
-                      onClose={() => setCommentSectionId(null)}
-                    />
-                  )}
-                </div>
-
-                <div className="p-3.5 pl-5">
-                  {/* ── Row 1: speaker + timestamps ── */}
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    {/* speaker avatar + name */}
-                    <div className="flex items-center gap-2">
-                    <div className={`flex h-6 w-6 items-center justify-center rounded-full text-[9px] font-bold ring-2 ${color.bg} ${color.text} ${color.ring}`}>
-                      {getSpeakerInitials(section.speaker)}
+                      <div className="flex items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1 rounded-lg bg-zinc-100 px-2.5 py-1 text-xs font-mono text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 text-zinc-400">
+                            <path fillRule="evenodd" d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z" clipRule="evenodd" />
+                          </svg>
+                          {formatTimestamp(section.begin_timestamp)} → {formatTimestamp(section.end_timestamp)}
+                        </span>
+                      </div>
                     </div>
-                    <InlineEdit
-                      value={section.speaker ?? ""}
-                      onSave={(v) => saveField(section.id, "speaker", v)}
-                      className="text-xs font-semibold text-zinc-900 dark:text-zinc-100"
-                    />
+
+                    {/* transcript text */}
+                    <div className="mt-2.5">
+                      <InlineEdit
+                        value={section.edited_text ?? section.original_text ?? ""}
+                        onSave={(v) => saveField(section.id, "edited_text", v)}
+                        onEditStart={pausePlayback}
+                        multiline
+                        className="block w-full rounded-xl text-sm leading-snug"
+                        highlight={searchQuery}
+                        matchOffset={baseOffset}
+                        activeMatchIndex={searchMatchIndex}
+                      />
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
-                    <span className="inline-flex items-center gap-1 rounded-lg bg-zinc-100 px-2.5 py-1 text-xs font-mono text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 text-zinc-400">
-                        <path fillRule="evenodd" d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z" clipRule="evenodd" />
+                  {/* ── Right: icon strip with popouts ── */}
+                  <div className="relative flex-shrink-0 border-l border-zinc-100 dark:border-zinc-800 flex flex-col items-center gap-1 py-2 px-1.5">
+
+                    {/* Notes icon */}
+                    <button
+                      type="button"
+                      onClick={() => setSidebarPanel(sidebarPanel?.sectionId === section.id && sidebarPanel?.panel === "notes" ? null : { sectionId: section.id, panel: "notes" })}
+                      className={`cursor-pointer relative rounded-lg p-2 transition-all ${
+                        sidebarPanel?.sectionId === section.id && sidebarPanel?.panel === "notes"
+                          ? "bg-sky-100 text-sky-600 ring-2 ring-sky-300 dark:bg-sky-500/20 dark:text-sky-400 dark:ring-sky-500/40"
+                          : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                      }`}
+                      title="Notes"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
+                        <path fillRule="evenodd" d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317 .713 2.435 0 3.277 0 4.26v4.48ZM5 6.5a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 6.5Zm.75 1.75a.75.75 0 0 0 0 1.5h2.5a.75.75 0 0 0 0-1.5h-2.5Z" clipRule="evenodd" />
                       </svg>
-                      {formatTimestamp(section.begin_timestamp)} → {formatTimestamp(section.end_timestamp)}
-                    </span>
+                      {comments.filter((c) => c.section_id === section.section_id).length > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-sky-500 px-1 text-[9px] font-bold text-white">
+                          {comments.filter((c) => c.section_id === section.section_id).length}
+                        </span>
+                      )}
+                    </button>
+
+                    {/* Tags icon */}
+                    <button
+                      type="button"
+                      onClick={() => setSidebarPanel(sidebarPanel?.sectionId === section.id && sidebarPanel?.panel === "tags" ? null : { sectionId: section.id, panel: "tags" })}
+                      className={`cursor-pointer relative rounded-lg p-2 transition-all ${
+                        sidebarPanel?.sectionId === section.id && sidebarPanel?.panel === "tags"
+                          ? "bg-orange-100 text-orange-600 ring-2 ring-orange-300 dark:bg-orange-500/20 dark:text-orange-400 dark:ring-orange-500/40"
+                          : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                      }`}
+                      title="Tags"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
+                        <path fillRule="evenodd" d="M4.5 2A2.5 2.5 0 0 0 2 4.5v2.879a2.5 2.5 0 0 0 .732 1.767l4.5 4.5a2.5 2.5 0 0 0 3.536 0l2.878-2.878a2.5 2.5 0 0 0 0-3.536l-4.5-4.5A2.5 2.5 0 0 0 7.38 2H4.5ZM5 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
+                      </svg>
+                      {tags.length > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-orange-500 px-1 text-[9px] font-bold text-white">
+                          {tags.length}
+                        </span>
+                      )}
+                    </button>
+
+                    {/* Edits icon */}
+                    <button
+                      type="button"
+                      onClick={() => setDiffSectionId(section.id)}
+                      className={`cursor-pointer relative rounded-lg p-2 transition-all ${
+                        (section.edited_text ?? null) !== null && section.edited_text !== section.original_text
+                          ? "text-amber-600 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-500/20"
+                          : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                      }`}
+                      title={(section.edited_text ?? null) !== null && section.edited_text !== section.original_text ? "Show edits" : "Compare"}
+                    >
+                      {/* Side-by-side diff / compare icon */}
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
+                        <path fillRule="evenodd" d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-9ZM7.25 3.5H3.5v9h3.75v-9Zm1.5 0v9H12.5v-9H8.75Z" clipRule="evenodd" />
+                      </svg>
+                      {(section.edited_text ?? null) !== null && section.edited_text !== section.original_text && (
+                        <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-white dark:ring-zinc-900" />
+                      )}
+                    </button>
+
+                    {/* ── Notes popout ── */}
+                    {sidebarPanel?.sectionId === section.id && sidebarPanel?.panel === "notes" && (
+                      <div className="absolute right-full top-0 z-40 mr-2 w-80 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+                        <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
+                          <div className="flex items-center gap-1.5">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-sky-500">
+                              <path fillRule="evenodd" d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317 .713 2.435 0 3.277 0 4.26v4.48ZM5 6.5a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 6.5Zm.75 1.75a.75.75 0 0 0 0 1.5h2.5a.75.75 0 0 0 0-1.5h-2.5Z" clipRule="evenodd" />
+                            </svg>
+                            <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Notes</span>
+                            <span className="text-[10px] text-zinc-400">({comments.filter((c) => c.section_id === section.section_id).length})</span>
+                          </div>
+                          <button type="button" onClick={() => setSidebarPanel(null)} className="cursor-pointer rounded-lg p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300" aria-label="Close">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg>
+                          </button>
+                        </div>
+                        <div className="max-h-[220px] overflow-y-auto">
+                          {(() => {
+                            const sectionNotes = comments.filter((c) => c.section_id === section.section_id);
+                            if (sectionNotes.length === 0) {
+                              return (
+                                <div className="flex flex-col items-center justify-center gap-1 py-6">
+                                  <p className="text-xs font-medium text-zinc-400">No notes yet</p>
+                                  <p className="text-[10px] text-zinc-300 dark:text-zinc-600">Add one below.</p>
+                                </div>
+                              );
+                            }
+                            return (
+                              <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                                {sectionNotes.map((c) => (
+                                  <div key={c.id} className="px-4 py-2.5">
+                                    <p className="text-[11px] leading-snug text-zinc-600 dark:text-zinc-400">{c.comment}</p>
+                                    <p className="mt-0.5 text-[10px] text-zinc-300 dark:text-zinc-600">{c.created_at ? new Date(c.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                        <div className="border-t border-zinc-100 px-3 py-2.5 dark:border-zinc-800">
+                          <InlineCommentInput
+                            transcriptId={transcriptId}
+                            sectionId={section.section_id}
+                            onCommentAdded={() => fetchComments(true)}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── Tags popout ── */}
+                    {sidebarPanel?.sectionId === section.id && sidebarPanel?.panel === "tags" && (
+                      <div className="absolute right-full top-0 z-40 mr-2 w-72 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+                        <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
+                          <div className="flex items-center gap-1.5">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-orange-500">
+                              <path fillRule="evenodd" d="M4.5 2A2.5 2.5 0 0 0 2 4.5v2.879a2.5 2.5 0 0 0 .732 1.767l4.5 4.5a2.5 2.5 0 0 0 3.536 0l2.878-2.878a2.5 2.5 0 0 0 0-3.536l-4.5-4.5A2.5 2.5 0 0 0 7.38 2H4.5ZM5 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
+                            </svg>
+                            <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Tags</span>
+                          </div>
+                          <button type="button" onClick={() => setSidebarPanel(null)} className="cursor-pointer rounded-lg p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300" aria-label="Close">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg>
+                          </button>
+                        </div>
+                        <div className="p-4">
+                          <TagEditor
+                            tags={tags}
+                            onAdd={(tag) => handleAddTag(section.id, tags, tag)}
+                            onRemove={(tag) => handleRemoveTag(section.id, tags, tag)}
+                          />
+                        </div>
+                      </div>
+                    )}
+
                   </div>
-                </div>
-
-                {/* ── Row 2: transcript text ── */}
-                <div className="mt-2.5">
-                  <InlineEdit
-                    value={section.edited_text ?? section.original_text ?? ""}
-                    onSave={(v) => saveField(section.id, "edited_text", v)}
-                    multiline
-                    className="block w-full rounded-xl text-sm leading-snug"
-                    highlight={searchQuery}
-                    matchOffset={baseOffset}
-                    activeMatchIndex={searchMatchIndex}
-                  />
-                </div>
-
-                {/* ── Row 3: tags ── */}
-                <div className="mt-3 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 text-zinc-300 dark:text-zinc-600">
-                      <path fillRule="evenodd" d="M4.5 2A2.5 2.5 0 0 0 2 4.5v2.879a2.5 2.5 0 0 0 .732 1.767l4.5 4.5a2.5 2.5 0 0 0 3.536 0l2.878-2.878a2.5 2.5 0 0 0 0-3.536l-4.5-4.5A2.5 2.5 0 0 0 7.38 2H4.5ZM5 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
-                    </svg>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-                      Tags
-                    </p>
-                  </div>
-                  <TagEditor
-                    tags={tags}
-                    onAdd={(tag) => handleAddTag(section.id, tags, tag)}
-                    onRemove={(tag) => handleRemoveTag(section.id, tags, tag)}
-                  />
-                  </div>
-
-
                 </div>
               </div>
             </div>
@@ -1821,7 +2014,7 @@ export default function TranscriptEditorPage() {
       {diffSectionId !== null && (() => {
         const sec = sections.find((s) => s.id === diffSectionId);
         if (!sec) return null;
-        return <DiffModal section={sec} onClose={() => setDiffSectionId(null)} />;
+        return <DiffModal section={sec} onClose={() => setDiffSectionId(null)} onSave={(v) => saveField(sec.id, "edited_text", v)} />;
       })()}
     </section>
   );
