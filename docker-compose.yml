@@ -1,0 +1,13 @@
+include:
+  - docker-compose.infra.yml
+  - docker-compose.apps.yml
+
+services:
+  backend:
+    environment:
+      AppEnvironment: ${AppEnvironment:-live}
+
+  frontend:
+    environment:
+      AppEnvironment: ${AppEnvironment:-live}
+      WATCHPACK_POLLING: "${WatchpackPolling:-true}"

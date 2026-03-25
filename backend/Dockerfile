@@ -1,8 +1,4 @@
-FROM python:3.10.14-slim
-
-WORKDIR /code/app
-
-COPY app /code/app
+FROM python:3.10.14-slim AS base
 
 # Define build arguments
 ARG AppEnvironment
@@ -11,10 +7,11 @@ ARG BuildId
 ARG BuildUser
 
 # Set environment variables using build arguments
-ENV AppEnvironment=dev
+ENV AppEnvironment=${AppEnvironment}
 ENV BuildNumber=${BuildNumber}
 ENV BuildId=${BuildId}
 ENV BuildUser=${BuildUser}
+ENV PYTHONPATH="${PYTHONPATH}:/code"
 
 WORKDIR /
 
@@ -34,8 +31,14 @@ RUN apt-get -y update && \
     apt-get install ffmpeg libsm6 libxext6  -y && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-ENV PYTHONPATH="${PYTHONPATH}:/code/app"
 WORKDIR /code/app
+COPY app /code/app
 RUN pip install --no-cache-dir --upgrade -r /code/app/requirements.txt
 
+EXPOSE 80
+
+FROM base AS dev
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80", "--reload"]
+
+FROM base AS prod
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]

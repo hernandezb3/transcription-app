@@ -13,11 +13,12 @@ Use to generate python db update scripts
 alembic revision --autogenerate --rev-id 00 -m "add_transcript_indexes"
 ```
 
+## How to Auto Apply database changes
+``` powershell
+alembic upgrade head
+```
+
 ## How to create SQL script
 ``` powershell
 alembic upgrade head --sql > alembic\versions\release.sql
-```
-## How to Auto Apply migration scripts
-``` powershell
-alembic upgrade head
 ```

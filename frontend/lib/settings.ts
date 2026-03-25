@@ -1,7 +1,7 @@
 import localSettings from "@/settings.local.json";
 import liveSettings from "@/settings.live.json";
 
-const appEnv = (process.env.APP_ENVIRONMENT ?? "local").toLowerCase();
+export const appEnv = (process.env.AppEnvironment ?? "local").toLowerCase();
 
 const settingsByEnv = {
 	local: localSettings,

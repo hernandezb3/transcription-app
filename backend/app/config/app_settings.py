@@ -39,7 +39,8 @@ class SettingsConfig:
 
     def get_base_settings(self):
         
-        settings_file = f'app/config/settings.{self.environment}.json'
+        config_dir = os.path.dirname(os.path.abspath(__file__))
+        settings_file = os.path.join(config_dir, f'settings.{self.environment}.json')
         
         try:
             with open(settings_file, 'r') as file:

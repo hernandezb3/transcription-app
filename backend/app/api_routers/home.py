@@ -75,7 +75,7 @@ def read_root(request: Request):
                 </style>
             </head>
             <body>
-                <h1>Transcription Services API</h1>
+                <h1>Transcription Services API · Live Reload ✅ (v2)</h1>
                 <div class="image-container">
                     <img src="{img_src}" alt="avocado" width="500" height="500">
                 </div>

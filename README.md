@@ -20,39 +20,83 @@ nextJS is
 npm is the package manager for the application
 
 
-## Set up the CLI environment
-Add CLI environment to frontend/
+## Running Locally
+
+### Front-end
+change directories into frontend
+``` bash
+cd frontend
+```
+
+installing node packages
+``` bash
 npm install
+```
 
-Start the front end:
+starting the frontend
+
+``` bash
 npm run dev
+```
+
+### Backend
+open vs code to backend
+
+verify venv is created
 
 
+press play and debug button
+
+
+#### update database stuff
+to apply data base changes
+
+1. activate venv
+2. run
+``` bash
+alembic head upgrade
+```
 
  # create the infrastructure
 
-Install Podman Deskop. 
+Install Podman Desktop. 
 
 Podman is an open-source containerization application (like Docker).
 
 
+## Running Infrastructure
 
-## one-time setup — create shared network
+Use Podman for all container commands.
+
+### one-time setup (do this once)
+Create the shared network:
     podman network create transcription-shared
 
-## step 1 — start infra (postgres, pgadmin, azurite)
-    podman compose -f docker-compose.infra.yml up -d
+### DEV mode (hot reload)
+Use this when you are actively coding. File changes refresh automatically.
 
-## step 2 — start apps (backend + frontend)
-    podman compose -f docker-compose.apps.yml up -d
+First run (or after dependency / Dockerfile changes):
+    $env:AppEnvironment="dev"; $env:BackendTarget="dev"; $env:FrontendTarget="dev"; $env:WatchpackPolling="true"; podman compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 
-## rebuild apps only (no infra restart)
-    podman compose -f docker-compose.apps.yml up --build -d
+Normal dev start (faster, no rebuild):
+    $env:AppEnvironment="dev"; $env:BackendTarget="dev"; $env:FrontendTarget="dev"; $env:WatchpackPolling="true"; podman compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
-## tear down apps only
-    podman compose -f docker-compose.apps.yml down
+Stop dev stack:
+    podman compose -f docker-compose.yml -f docker-compose.dev.yml down
 
-## tear down everything (infra + apps)
-    podman compose -f docker-compose.apps.yml down
-    podman compose -f docker-compose.infra.yml down -v
+### PROD-style mode (no hot reload)
+Use this to test behavior close to deployment.
+
+Build and run prod-style images:
+    $env:AppEnvironment="live"; $env:BackendTarget="prod"; $env:FrontendTarget="prod"; $env:WatchpackPolling="false"; podman compose -f docker-compose.yml up --build -d
+
+Stop prod-style stack:
+    podman compose -f docker-compose.yml down
+
+Remove everything including data volumes:
+    podman compose -f docker-compose.yml down -v
+
+### plain-English difference
+- DEV mode = easier coding experience + auto refresh.
+- PROD-style mode = packaged app behavior, no live code syncing.
  

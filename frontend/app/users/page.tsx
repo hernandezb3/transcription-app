@@ -33,49 +33,6 @@ type CreateUserPayload = {
 };
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
-type SampleCharacter = {
-  first_name: string;
-  last_name: string;
-  alias: string;
-  faction: "hero" | "villain";
-};
-
-const SAMPLE_CHARACTERS: SampleCharacter[] = [
-  { first_name: "Peter", last_name: "Parker", alias: "Spider-Man", faction: "hero" },
-  { first_name: "Bruce", last_name: "Wayne", alias: "Batman", faction: "hero" },
-  { first_name: "Clark", last_name: "Kent", alias: "Superman", faction: "hero" },
-  { first_name: "Diana", last_name: "Prince", alias: "Wonder Woman", faction: "hero" },
-  { first_name: "Tony", last_name: "Stark", alias: "Iron Man", faction: "hero" },
-  { first_name: "Steve", last_name: "Rogers", alias: "Captain America", faction: "hero" },
-  { first_name: "Natasha", last_name: "Romanoff", alias: "Black Widow", faction: "hero" },
-  { first_name: "Barry", last_name: "Allen", alias: "The Flash", faction: "hero" },
-  { first_name: "Lex", last_name: "Luthor", alias: "Lex Luthor", faction: "villain" },
-  { first_name: "Norman", last_name: "Osborn", alias: "Green Goblin", faction: "villain" },
-  { first_name: "Otto", last_name: "Octavius", alias: "Doctor Octopus", faction: "villain" },
-  { first_name: "Harley", last_name: "Quinn", alias: "Harley Quinn", faction: "villain" },
-  { first_name: "Victor", last_name: "Doom", alias: "Doctor Doom", faction: "villain" },
-  { first_name: "Loki", last_name: "Laufeyson", alias: "Loki", faction: "villain" },
-  { first_name: "Thanos", last_name: "Titan", alias: "Thanos", faction: "villain" },
-  { first_name: "Edward", last_name: "Nygma", alias: "The Riddler", faction: "villain" },
-];
-
-function randomFrom<T>(items: T[]): T {
-  return items[Math.floor(Math.random() * items.length)];
-}
-
-function buildSampleUser(): CreateUserPayload {
-  const character = randomFrom(SAMPLE_CHARACTERS);
-  const userName = `${character.first_name}-${character.last_name}`.toLowerCase();
-
-  return {
-    user_name: userName,
-    user_email: `${userName}@bridge-collab.com`,
-    first_name: character.first_name,
-    last_name: character.last_name,
-    display_name: `${character.alias} (${character.faction})`,
-    active: 1,
-  };
-}
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -90,8 +47,6 @@ export default function UsersPage() {
   const [pageInputValue, setPageInputValue] = useState("1");
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
-  const [sampleUserCount, setSampleUserCount] = useState(5);
-  const [isCreatingSampleUsers, setIsCreatingSampleUsers] = useState(false);
   const [createForm, setCreateForm] = useState<CreateUserPayload>({
     user_name: "",
     user_email: "",
@@ -224,44 +179,6 @@ export default function UsersPage() {
     }
   };
 
-  const handleCreateSampleUsers = async () => {
-    const count = Math.min(25, Math.max(1, Math.floor(sampleUserCount || 1)));
-    setIsCreatingSampleUsers(true);
-    setError(null);
-
-    try {
-      const responses = await Promise.allSettled(
-        Array.from({ length: count }, (_, index) =>
-          fetch("/api/users", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(buildSampleUser()),
-          })
-        )
-      );
-
-      const successCount = responses.filter(
-        (result) => result.status === "fulfilled" && result.value.ok
-      ).length;
-
-      if (successCount === 0) {
-        throw new Error("No users created");
-      }
-
-      if (successCount < count) {
-        setError(`Created ${successCount} of ${count} sample users.`);
-      }
-
-      await loadUsers(currentPage, pageSize, false);
-    } catch {
-      setError("Could not create sample users.");
-    } finally {
-      setIsCreatingSampleUsers(false);
-    }
-  };
-
   const firstEntryIndex = totalEntries === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const lastEntryIndex = Math.min(currentPage * pageSize, totalEntries);
   const canGoPrevious = currentPage > 1;
@@ -272,30 +189,6 @@ export default function UsersPage() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold">Users</h2>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900">
-            <label htmlFor="sample-user-count" className="text-sm text-zinc-600 dark:text-zinc-300">
-              Sample count
-            </label>
-            <input
-              id="sample-user-count"
-              type="number"
-              min={1}
-              max={25}
-              value={sampleUserCount}
-              onChange={(event) => setSampleUserCount(Number(event.target.value))}
-              className="w-16 rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-700 focus:border-sky-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
-            />
-          </div>
-
-          <button
-            type="button"
-            onClick={handleCreateSampleUsers}
-            disabled={isCreatingSampleUsers}
-            className="cursor-pointer rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isCreatingSampleUsers ? "Creating..." : "Create Sample Users"}
-          </button>
-
           <button
             type="button"
             onClick={() => setIsAddUserOpen(true)}

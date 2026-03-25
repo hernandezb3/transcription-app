@@ -1,4 +1,4 @@
-import { settings } from "@/lib/settings";
+import { settings, appEnv } from "@/lib/settings";
 
 type SettingRow = {
   section: string;
@@ -32,6 +32,11 @@ export default function SettingsPage() {
   return (
     <section className="space-y-4">
       <h2 className="text-2xl font-semibold">Settings</h2>
+
+      <div className="inline-flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <span className="font-medium">AppEnvironment:</span>
+        <span className="rounded bg-zinc-100 px-2 py-0.5 font-mono dark:bg-zinc-800">{appEnv}</span>
+      </div>
 
       <div className="overflow-hidden rounded-md border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         <table className="min-w-full text-left text-sm">

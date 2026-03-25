@@ -957,6 +957,13 @@ export default function TranscriptEditorPage() {
   const [sidebarPanel, setSidebarPanel] = useState<{ sectionId: number; panel: "notes" | "tags" | "edits" } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
+  const notesListRef = useRef<HTMLDivElement>(null);
+  const previousNotesCountRef = useRef(0);
+
+  const activeSidebarSection = sidebarPanel ? sections.find((s) => s.id === sidebarPanel.sectionId) : null;
+  const activeNotesCount = sidebarPanel?.panel === "notes" && activeSidebarSection
+    ? comments.filter((c) => c.section_id === activeSidebarSection.section_id).length
+    : 0;
 
   // Close export dropdown on outside click
   useEffect(() => {
@@ -988,6 +995,26 @@ export default function TranscriptEditorPage() {
   useEffect(() => {
     fetchComments();
   }, [fetchComments]);
+
+  // Keep notes popout pinned to latest comment when opened or when a new comment arrives
+  useEffect(() => {
+    if (sidebarPanel?.panel !== "notes") {
+      previousNotesCountRef.current = 0;
+      return;
+    }
+
+    const shouldScroll =
+      previousNotesCountRef.current === 0 || activeNotesCount > previousNotesCountRef.current;
+
+    previousNotesCountRef.current = activeNotesCount;
+
+    if (!shouldScroll) return;
+
+    requestAnimationFrame(() => {
+      if (!notesListRef.current) return;
+      notesListRef.current.scrollTop = notesListRef.current.scrollHeight;
+    });
+  }, [sidebarPanel?.panel, sidebarPanel?.sectionId, activeNotesCount]);
 
   /* ---------- Fetch transcript sections ---------- */
 
@@ -1461,7 +1488,7 @@ export default function TranscriptEditorPage() {
                     if (e.shiftKey) goToPrevMatch(); else goToNextMatch();
                   }
                 }}
-                placeholder="Search transcript…"
+                placeholder="Search transcript.."
                 className={`w-64 rounded-xl border bg-zinc-50 py-2 pl-9 text-sm font-medium placeholder:text-zinc-400 shadow-sm transition-all hover:border-orange-300 hover:bg-orange-50 focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-200 dark:bg-zinc-800 dark:placeholder:text-zinc-500 dark:hover:border-orange-500/40 dark:hover:bg-orange-500/10 dark:focus:border-orange-500/50 dark:focus:ring-orange-500/20 ${
                   searchQuery ? "pr-20 border-orange-300 dark:border-orange-500/40" : "pr-8 border-zinc-200 dark:border-zinc-700"
                 }`}
@@ -1509,18 +1536,20 @@ export default function TranscriptEditorPage() {
             <div className="relative" ref={exportRef}>
               <button
                 type="button"
+                title="Export transcript menu"
+                aria-label="Export transcript menu"
                 onClick={() => setExportOpen((prev) => !prev)}
-                className={`cursor-pointer inline-flex items-center gap-1.5 rounded-xl border bg-zinc-50 px-3 py-2 text-xs font-semibold shadow-sm transition-all hover:border-orange-300 hover:bg-orange-50 hover:text-orange-700 hover:shadow dark:bg-zinc-800 dark:hover:border-orange-500/40 dark:hover:bg-orange-500/10 dark:hover:text-orange-300 ${
+                className={`cursor-pointer inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold shadow-sm transition-all ${
                   exportOpen
-                    ? "border-orange-400 text-orange-700 ring-2 ring-orange-200 dark:border-orange-500/50 dark:text-orange-300 dark:ring-orange-500/20"
-                    : "border-zinc-200 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400"
+                    ? "border-orange-500 bg-orange-600 text-white ring-2 ring-orange-300 shadow-orange-200 dark:border-orange-400 dark:bg-orange-500 dark:ring-orange-500/30 dark:shadow-orange-500/20"
+                    : "border-orange-400 bg-orange-500 text-white shadow-orange-200 hover:bg-orange-600 hover:shadow-md hover:shadow-orange-200 dark:border-orange-500 dark:bg-orange-500 dark:shadow-orange-500/20 dark:hover:bg-orange-400"
                 }`}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
                   <path fillRule="evenodd" d="M4 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V6.621a1.5 1.5 0 0 0-.44-1.06L9.94 2.439A1.5 1.5 0 0 0 8.878 2H4Zm4 3.5a.75.75 0 0 1 .75.75v2.69l.72-.72a.75.75 0 1 1 1.06 1.06l-2 2a.75.75 0 0 1-1.06 0l-2-2a.75.75 0 0 1 1.06-1.06l.72.72V6.25A.75.75 0 0 1 8 5.5Z" clipRule="evenodd" />
                 </svg>
                 Export
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className={`h-3 w-3 text-zinc-400 transition-transform ${exportOpen ? "rotate-180" : ""}`}>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className={`h-3 w-3 text-white/70 transition-transform ${exportOpen ? "rotate-180" : ""}`}>
                   <path fillRule="evenodd" d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
                 </svg>
               </button>
@@ -1538,10 +1567,7 @@ export default function TranscriptEditorPage() {
                           <path fillRule="evenodd" d="M4 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V6.621a1.5 1.5 0 0 0-.44-1.06L9.94 2.439A1.5 1.5 0 0 0 8.878 2H4ZM5.25 7.5A.75.75 0 0 1 6 6.75h4a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Zm0 3a.75.75 0 0 1 .75-.75h4a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
                         </svg>
                       </div>
-                      <div>
-                        <p className="font-semibold text-zinc-700 dark:text-zinc-200">Text file</p>
-                        <p className="text-[10px] text-zinc-400 dark:text-zinc-500">Transcript-style .txt</p>
-                      </div>
+                      <p className="font-semibold text-zinc-700 dark:text-zinc-200">Text File</p>
                     </button>
                     <button
                       type="button"
@@ -1553,10 +1579,7 @@ export default function TranscriptEditorPage() {
                           <path fillRule="evenodd" d="M4 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V6.621a1.5 1.5 0 0 0-.44-1.06L9.94 2.439A1.5 1.5 0 0 0 8.878 2H4Zm1 5.75a.75.75 0 0 1 .75-.75h.5a.75.75 0 0 1 0 1.5h-.5a.75.75 0 0 1-.75-.75Zm3 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5a.75.75 0 0 1-.75-.75ZM5.75 10a.75.75 0 0 0 0 1.5h.5a.75.75 0 0 0 0-1.5h-.5Zm2.25.75a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
                         </svg>
                       </div>
-                      <div>
-                        <p className="font-semibold text-zinc-700 dark:text-zinc-200">JSON file</p>
-                        <p className="text-[10px] text-zinc-400 dark:text-zinc-500">Structured data .json</p>
-                      </div>
+                      <p className="font-semibold text-zinc-700 dark:text-zinc-200">JSON File</p>
                     </button>
                   </div>
                 </div>
@@ -1942,7 +1965,7 @@ export default function TranscriptEditorPage() {
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg>
                           </button>
                         </div>
-                        <div className="max-h-[220px] overflow-y-auto">
+                        <div ref={notesListRef} className="max-h-[220px] overflow-y-auto">
                           {(() => {
                             const sectionNotes = comments.filter((c) => c.section_id === section.section_id);
                             if (sectionNotes.length === 0) {

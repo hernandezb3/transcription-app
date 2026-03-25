@@ -3,13 +3,15 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      target: ${BackendTarget:-dev}
+      args:
+        AppEnvironment: ${AppEnvironment:-live}
+        BuildNumber: ${BuildNumber:-local}
+        BuildId: ${BuildId:-local}
+        BuildUser: ${BuildUser:-local}
     container_name: transcriptions-backend
-    environment:
-      AppEnvironment: live
     ports:
       - "8000:80"
-    volumes:
-      - ./backend:/app:z
     networks:
       - transcription-shared
 
@@ -17,22 +19,20 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      target: ${FrontendTarget:-dev}
+      args:
+        AppEnvironment: ${AppEnvironment:-live}
+        BuildNumber: ${BuildNumber:-local}
+        BuildId: ${BuildId:-local}
+        BuildUser: ${BuildUser:-local}
     container_name: transcriptions-frontend
-    environment:
-      AppEnvironment: live
     ports:
       - "3000:3000"
-    volumes:
-      - ./frontend:/app:z
-      - frontend_node_modules:/app/node_modules
-      - frontend_next:/app/.next
     depends_on:
       - backend
+    networks:
+      - transcription-shared
 
 networks:
   transcription-shared:
     external: true
-
-volumes:
-  frontend_node_modules:
-  frontend_next:
