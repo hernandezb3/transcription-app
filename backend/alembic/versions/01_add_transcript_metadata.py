@@ -1,7 +1,7 @@
 """add_transcript metadata
 
-Revision ID: 02
-Revises: 01
+Revision ID: 01
+Revises: 00
 Create Date: 2026-03-23 21:44:29.006840
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '02'
-down_revision: Union[str, Sequence[str], None] = '01'
+revision: str = '01'
+down_revision: Union[str, Sequence[str], None] = '00'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

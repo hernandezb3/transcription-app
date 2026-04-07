@@ -30,6 +30,7 @@ def upgrade() -> None:
     sa.Column('end_timestamp', sa.String(length=50), nullable=True),
     sa.Column('original_text', sa.Text(), nullable=True),
     sa.Column('edited_text', sa.Text(), nullable=True),
+    sa.Column('tags', sa.Text(), nullable=True),
     sa.Column('is_active', sa.Integer(), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     schema='public'

@@ -15,6 +15,20 @@ class MicrophoneColorsT(Base):
     modified_by = Column(Integer, nullable=False)
     active = Column(Integer, nullable=False, default=1)
 
+class LessonSubjectsT(Base):
+    __tablename__ = 'lesson_subjects_t'
+    __table_args__ = {'schema': Schema}
+    id = Column(Integer, primary_key=True, nullable=False, server_default=Identity(start=1, increment=1))
+
+    name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+
+    created = Column(DateTime, nullable=False)
+    created_by = Column(Integer, nullable=False)
+    modified = Column(DateTime, nullable=False)
+    modified_by = Column(Integer, nullable=False)
+    active = Column(Integer, nullable=False, default=1)
+
 class ParticipantsT(Base):
     __tablename__ = 'participants_t'
     __table_args__ = {'schema': Schema}

@@ -57,10 +57,10 @@
   },
 
   "Storage": {
-    "ServiceProvider": "Azurite",
+    "ServiceProvider": "AzureStorageAccount",
     "Settings": {
       "ContainerName": "00-files",
-      "ConnectionString": "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=TEMP_KEY_314159;BlobEndpoint=http://localhost:10000/devstoreaccount1;QueueEndpoint=http://localhost:10001/devstoreaccount1;",
+      "ConnectionString": "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:10000/devstoreaccount1;QueueEndpoint=http://localhost:10001/devstoreaccount1;",
       "AccountName": "devstoreaccount1",
       "Url": "http://localhost:10000/devstoreaccount1",
       "PoolSize": 5

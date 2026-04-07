@@ -1,7 +1,7 @@
 """seed initial data
 
-Revision ID: 03
-Revises: 02
+Revision ID: 02
+Revises: 01
 Create Date: 2026-03-24 00:00:00.000000
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '03'
-down_revision: Union[str, Sequence[str], None] = '02'
+revision: str = '02'
+down_revision: Union[str, Sequence[str], None] = '01'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -91,8 +91,42 @@ def upgrade() -> None:
         ON CONFLICT DO NOTHING;
     """)
 
+    # Seed microphone colors
+    op.execute("""
+        INSERT INTO public.microphone_colors_t (
+            color, description,
+            created, created_by, modified, modified_by, active
+        ) VALUES
+        ('Teacher',  'Teacher mic',                     NOW(), 1, NOW(), 1, 1),
+        ('Blue',    'Kid mic',                         NOW(), 1, NOW(), 1, 1),
+        ('Green',   'Kid mic',                         NOW(), 1, NOW(), 1, 1),
+        ('Orange',  'Kid mic',                         NOW(), 1, NOW(), 1, 1),
+        ('Purple', 'Kid mic',                         NOW(), 1, NOW(), 1, 1),
+        ('Red', 'Kid mic',                         NOW(), 1, NOW(), 1, 1),
+        ('Yellow', 'Kid mic',                         NOW(), 1, NOW(), 1, 1)
+        ON CONFLICT DO NOTHING;
+    """)
+
+    # Seed participants
+    op.execute("""
+        INSERT INTO public.participants_t (
+            name, role, description, join_date, withdrawal_date,
+            "Status", "Number_of_Audio_Files", "Number_of_Videos",
+            created, created_by, modified, modified_by, active
+        ) VALUES
+        ('participant_001', 'Teacher', 'Anonymized teacher participant', '2026-01-15', NULL, 'Active', 5, 2, NOW(), 1, NOW(), 1, 1),
+        ('participant_002', 'Teacher', 'Anonymized teacher participant', '2026-01-15', NULL, 'Active', 3, 1, NOW(), 1, NOW(), 1, 1),
+        ('participant_003', 'Teacher', 'Anonymized teacher participant', '2026-01-15', NULL, 'Active', 4, 2, NOW(), 1, NOW(), 1, 1),
+        ('participant_004', 'Teacher', 'Anonymized teacher participant', '2026-02-01', NULL, 'Active', 0, 0, NOW(), 1, NOW(), 1, 1),
+        ('participant_005', 'Teacher', 'Anonymized teacher participant', '2026-02-10', NULL, 'Active', 2, 1, NOW(), 1, NOW(), 1, 1),
+        ('participant_006', 'Teacher', 'Anonymized teacher participant', '2026-01-15', NULL, 'Active', 1, 0, NOW(), 1, NOW(), 1, 1)
+        ON CONFLICT DO NOTHING;
+    """)
+
 
 def downgrade() -> None:
     """Remove seeded data."""
+    op.execute("DELETE FROM public.participants_t WHERE name IN ('participant_001','participant_002','participant_003','participant_004','participant_005','participant_006');")
+    op.execute("DELETE FROM public.microphone_colors_t WHERE color IN ('Teacher','Blue','Green','Orange','Purple','Red','Yellow');")
     op.execute("DELETE FROM public.transcript_details_t WHERE transcription_id = 1;")
     op.execute("DELETE FROM public.users_t WHERE unique_id IN ('bryan-hernandez-001', 'brittney-hernandez-001');")

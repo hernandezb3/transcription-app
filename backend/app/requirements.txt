@@ -40,3 +40,10 @@ alembic
 
 psycopg[binary]
 psycopg
+
+nemo-toolkit[asr]
+
+# transformers
+# torch
+# accelerate
+# git+https://github.com/gmchad/otterai-api.git

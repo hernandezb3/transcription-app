@@ -63,3 +63,17 @@ class TranscriptDetailsCommentsT(Base):
     created_by = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=True)
     is_active = Column(Integer, nullable=False, default=1)
+
+class TranscriptFilesT(Base):
+    __tablename__ = 'transcript_files_t'
+    __table_args__ = {'schema': Schema}
+    id = Column(Integer, primary_key=True, nullable=False, server_default=Identity(start=1, increment=1))
+
+    transcription_id = Column(Integer, nullable=True)
+    file_name = Column(String(200), nullable=True)
+    file_type = Column(String(50), nullable=True)
+    file_path = Column(Text, nullable=True)
+
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=True)
+    is_active = Column(Integer, nullable=False, default=1)
