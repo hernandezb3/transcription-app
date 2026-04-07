@@ -10,12 +10,36 @@ type AppShellProps = {
   children: React.ReactNode;
 };
 
-const navItems = [
-  { label: "Landing Page", href: "/" },
-  { label: "Transcriptions", href: "/transcriptions/1" },
-  { label: "Users", href: "/users" },
-  { label: "Settings", href: "/settings" },
+type NavLink = { label: string; href: string };
+type NavGroup = { label: string; children: NavLink[] };
+type NavEntry = NavLink | NavGroup;
+
+function isGroup(entry: NavEntry): entry is NavGroup {
+  return "children" in entry;
+}
+
+const navEntries: NavEntry[] = [
+  {
+    label: "Research",
+    children: [
+      { label: "Participants", href: "/participants" },
+    ],
+  },
+  {
+    label: "Administration",
+    children: [
+      { label: "Lesson Subjects", href: "/metadata/lesson-subjects" },
+      { label: "Microphone Colors", href: "/metadata" },
+      { label: "Users", href: "/users" },
+    ],
+  },
 ];
+
+/* flat list used for breadcrumb / page-title resolution */
+const allNavLinks: NavLink[] = navEntries.flatMap((e) =>
+  isGroup(e) ? e.children : [e],
+);
+
 const appName = settings.app?.name ?? "Project Focus";
 const defaultPageTitle = settings.app?.defaultPageTitle ?? "Landing Page";
 
@@ -24,9 +48,34 @@ export default function AppShell({ children }: AppShellProps) {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const pathname = usePathname();
-  const currentPageTitle =
-    navItems.find((item) => item.href === pathname)?.label ??
-    (pathname.startsWith("/transcriptions") ? "Transcript Editor" : defaultPageTitle);
+  /* ---- breadcrumb segments ---- */
+  const breadcrumbs: { label: string; href?: string }[] = (() => {
+    const direct = allNavLinks.find((item) => item.href === pathname);
+    if (direct) return [{ label: direct.label }];
+
+    if (pathname.startsWith("/transcriptions")) {
+      return [
+        { label: "Participants", href: "/participants" },
+        { label: "Audio" },
+      ];
+    }
+
+    return [{ label: defaultPageTitle }];
+  })();
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    for (const entry of navEntries) {
+      if (isGroup(entry)) {
+        initial[entry.label] =
+          entry.label === "Research" ||
+          entry.children.some((c) => pathname.startsWith(c.href));
+      }
+    }
+    return initial;
+  });
+  const toggleGroup = (label: string) =>
+    setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -80,8 +129,21 @@ export default function AppShell({ children }: AppShellProps) {
                 priority
               />
             </Link>
-            <div className="text-sm text-zinc-400">&gt;</div>
-            <h1 className="text-base font-semibold">{currentPageTitle}</h1>
+            {breadcrumbs.map((crumb, i) => (
+              <span key={crumb.label} className="flex items-center gap-2">
+                <div className="text-sm text-zinc-400">&gt;</div>
+                {crumb.href ? (
+                  <Link
+                    href={crumb.href}
+                    className="text-base font-semibold text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                  >
+                    {crumb.label}
+                  </Link>
+                ) : (
+                  <h1 className="text-base font-semibold">{crumb.label}</h1>
+                )}
+              </span>
+            ))}
           </div>
 
           <div className="flex items-center gap-2">
@@ -203,14 +265,81 @@ export default function AppShell({ children }: AppShellProps) {
           </div>
 
           <nav className="space-y-1 text-sm">
-            {navItems.map((item) => {
+            <Link
+              href="/"
+              className={`block cursor-pointer rounded-md px-3 py-2 transition-colors ${
+                pathname === "/"
+                  ? "bg-orange-50 text-orange-700 ring-1 ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-400/30"
+                  : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              }`}
+              onClick={() => setIsSidebarOpen(false)}
+            >
+              Home
+            </Link>
+
+            {navEntries.map((entry) => {
+              if (isGroup(entry)) {
+                const isOpen = !!openGroups[entry.label];
+                const toggle = () => toggleGroup(entry.label);
+                return (
+                  <div key={entry.label}>
+                    <button
+                      type="button"
+                      onClick={toggle}
+                      className="flex w-full cursor-pointer items-center justify-between rounded-md px-3 py-2 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                    >
+                      <span className="text-xs font-semibold uppercase tracking-wider">
+                        {entry.label}
+                      </span>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        className={`h-4 w-4 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M7.21 14.77a.75.75 0 0 1 .02-1.06L11.17 10 7.23 6.29a.75.75 0 1 1 1.04-1.08l4.5 4.25a.75.75 0 0 1 0 1.08l-4.5 4.25a.75.75 0 0 1-1.06-.02Z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </button>
+
+                    {isOpen && (
+                      <div className="ml-3 space-y-0.5 border-l border-zinc-200 pl-3 dark:border-zinc-700">
+                        {entry.children.map((child) => {
+                          const isActive =
+                            pathname === child.href ||
+                            pathname.startsWith(child.href + "/");
+                          return (
+                            <Link
+                              key={child.label}
+                              href={child.href}
+                              className={`block cursor-pointer rounded-md px-3 py-1.5 transition-colors ${
+                                isActive
+                                  ? "bg-orange-50 text-orange-700 ring-1 ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-400/30"
+                                  : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                              }`}
+                              onClick={() => setIsSidebarOpen(false)}
+                            >
+                              {child.label}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
+              /* standalone link */
               const isActive =
-                pathname === item.href || pathname.startsWith(item.href + "/") ||
-                (item.href !== "/" && pathname.startsWith(item.href.replace(/\/\d+$/, "")));
+                pathname === entry.href ||
+                pathname.startsWith(entry.href + "/");
               return (
                 <Link
-                  key={item.label}
-                  href={item.href}
+                  key={entry.label}
+                  href={entry.href}
                   className={`block cursor-pointer rounded-md px-3 py-2 transition-colors ${
                     isActive
                       ? "bg-orange-50 text-orange-700 ring-1 ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-400/30"
@@ -218,7 +347,7 @@ export default function AppShell({ children }: AppShellProps) {
                   }`}
                   onClick={() => setIsSidebarOpen(false)}
                 >
-                  {item.label}
+                  {entry.label}
                 </Link>
               );
             })}

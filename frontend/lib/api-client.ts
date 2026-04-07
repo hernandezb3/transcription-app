@@ -92,6 +92,18 @@ export class FastApiClient {
   async delete<T>(path: string, init?: RequestInit): Promise<T> {
     return this.request<T>(path, { ...init, method: "DELETE" });
   }
+
+  /**
+   * POST multipart/form-data (e.g. file uploads).
+   * Do NOT set Content-Type — fetch will add the boundary automatically.
+   */
+  async postFormData<T>(path: string, body: FormData, init?: RequestInit): Promise<T> {
+    return this.request<T>(path, {
+      ...init,
+      method: "POST",
+      body,
+    });
+  }
 }
 
 export const fastApiClient = new FastApiClient();

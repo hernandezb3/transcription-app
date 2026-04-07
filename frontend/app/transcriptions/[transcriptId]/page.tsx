@@ -935,14 +935,15 @@ export default function TranscriptEditorPage() {
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
 
-  // Global audio player state
+  // Global audio player state (backed by real <audio> element)
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [hasAudio, setHasAudio] = useState(false);
+  const [audioDuration, setAudioDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [playerTime, setPlayerTime] = useState(0); // global time in seconds
-  const playTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [playerTime, setPlayerTime] = useState(0);
   const [volume, setVolume] = useState(80);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const playbackSpeedRef = useRef(1);
   const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
   const speedMenuRef = useRef<HTMLDivElement>(null);
 
@@ -1097,10 +1098,34 @@ export default function TranscriptEditorPage() {
 
   /* ---------- Global audio player ---------- */
 
-  // Compute total transcript duration from all sections
-  const totalDuration = sections.length > 0
+  // Probe for an audio file once sections are loaded
+  useEffect(() => {
+    if (!transcriptId) return;
+    fetch(`/api/transcripts/${transcriptId}/audio`, { method: "HEAD" }).then((r) => {
+      if (r.ok) {
+        setHasAudio(true);
+      }
+    }).catch(() => { /* no audio available */ });
+  }, [transcriptId]);
+
+  // Sync volume / mute / speed to the <audio> element
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.volume = isMuted ? 0 : volume / 100;
+  }, [volume, isMuted]);
+
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.playbackRate = playbackSpeed;
+  }, [playbackSpeed]);
+
+  // Total duration: prefer real audio duration, fall back to section timestamps
+  const sectionDuration = sections.length > 0
     ? Math.max(...sections.map((s) => timestampToSeconds(s.end_timestamp)))
     : 0;
+  const totalDuration = audioDuration > 0 ? audioDuration : sectionDuration;
 
   // Determine which section is active based on playerTime
   const activeSectionId = (() => {
@@ -1120,47 +1145,7 @@ export default function TranscriptEditorPage() {
   if (activeSection) {
     lastActiveSectionRef.current = activeSection;
   }
-  // Show the current active section, or fall back to the last one during brief gaps
   const displaySection = activeSection ?? lastActiveSectionRef.current;
-
-  const startPlayback = useCallback(() => {
-    if (playTimerRef.current) clearInterval(playTimerRef.current);
-    setIsPlaying(true);
-    playTimerRef.current = setInterval(() => {
-      setPlayerTime((prev) => {
-        const increment = 0.25 * playbackSpeedRef.current;
-        if (prev >= totalDuration) {
-          clearInterval(playTimerRef.current!);
-          playTimerRef.current = null;
-          setIsPlaying(false);
-          return totalDuration;
-        }
-        return prev + increment;
-      });
-    }, 250);
-  }, [totalDuration]);
-
-  // Keep the ref in sync and restart timer when speed changes during playback
-  useEffect(() => {
-    playbackSpeedRef.current = playbackSpeed;
-    if (isPlaying) {
-      // Restart the interval with the new speed
-      if (playTimerRef.current) clearInterval(playTimerRef.current);
-      playTimerRef.current = setInterval(() => {
-        setPlayerTime((prev) => {
-          const increment = 0.25 * playbackSpeedRef.current;
-          if (prev >= totalDuration) {
-            clearInterval(playTimerRef.current!);
-            playTimerRef.current = null;
-            setIsPlaying(false);
-            return totalDuration;
-          }
-          return prev + increment;
-        });
-      }, 250);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playbackSpeed]);
 
   // Close speed menu on outside click
   useEffect(() => {
@@ -1173,9 +1158,22 @@ export default function TranscriptEditorPage() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  /* --- playback helpers (audio-element driven) --- */
+
+  const startPlayback = useCallback(() => {
+    const a = audioRef.current;
+    if (a && hasAudio) {
+      a.play().catch(() => {});
+      // isPlaying will be set by the onPlay event handler
+    } else if (!hasAudio && sections.length > 0) {
+      // Fallback: section-only mode (no audio)
+      setIsPlaying(true);
+    }
+  }, [hasAudio, sections.length]);
+
   const pausePlayback = useCallback(() => {
-    if (playTimerRef.current) clearInterval(playTimerRef.current);
-    playTimerRef.current = null;
+    const a = audioRef.current;
+    if (a) a.pause();
     setIsPlaying(false);
   }, []);
 
@@ -1183,37 +1181,39 @@ export default function TranscriptEditorPage() {
     if (isPlaying) {
       pausePlayback();
     } else {
-      // If at the end, restart
-      if (playerTime >= totalDuration) setPlayerTime(0);
+      const a = audioRef.current;
+      if (a && playerTime >= totalDuration && totalDuration > 0) {
+        a.currentTime = 0;
+        setPlayerTime(0);
+      }
       startPlayback();
     }
   }, [isPlaying, playerTime, totalDuration, startPlayback, pausePlayback]);
 
   const seekTo = useCallback((time: number) => {
-    setPlayerTime(Math.max(0, Math.min(time, totalDuration)));
+    const clamped = Math.max(0, Math.min(time, totalDuration || Infinity));
+    setPlayerTime(clamped);
+    const a = audioRef.current;
+    if (a) a.currentTime = clamped;
   }, [totalDuration]);
 
   const handlePlay = (section: TranscriptSection) => {
-    // If this section is already playing, toggle pause
     if (activeSectionId === section.id && isPlaying) {
       pausePlayback();
       return;
     }
-    // If this section is active but paused, just resume without seeking
     if (activeSectionId === section.id && !isPlaying) {
       startPlayback();
       return;
     }
-    // Different section — seek to its start
     const startSec = timestampToSeconds(section.begin_timestamp);
     seekTo(startSec);
-    // Small delay to let state update, then start
     setTimeout(() => startPlayback(), 50);
   };
 
   const sectionListRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to active section within the section list container
+  // Auto-scroll to active section
   useEffect(() => {
     if (activeSectionId !== null && isPlaying && sectionListRef.current) {
       const el = sectionListRef.current.querySelector(`[data-section-id="${activeSectionId}"]`) as HTMLElement | null;
@@ -1225,16 +1225,9 @@ export default function TranscriptEditorPage() {
     }
   }, [activeSectionId, isPlaying]);
 
-  useEffect(() => {
-    return () => {
-      if (playTimerRef.current) clearInterval(playTimerRef.current);
-    };
-  }, []);
-
   // Global keyboard shortcuts: Space = play/pause, Left/Right arrows = ±5s
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
-      // Don't intercept when the user is typing in an input, textarea, or contentEditable
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
 
@@ -1424,6 +1417,40 @@ export default function TranscriptEditorPage() {
 
   return (
     <section className="flex flex-col h-[calc(100vh-5rem)] -m-6">
+      {/* Hidden HTML5 audio element — drives the real playback */}
+      {hasAudio && (
+        <audio
+          ref={audioRef}
+          src={`/api/transcripts/${transcriptId}/audio`}
+          preload="auto"
+          onLoadedMetadata={() => {
+            const a = audioRef.current;
+            if (a && a.duration && isFinite(a.duration)) {
+              setAudioDuration(a.duration);
+            }
+          }}
+          onTimeUpdate={() => {
+            const a = audioRef.current;
+            if (a) setPlayerTime(a.currentTime);
+          }}
+          onEnded={() => {
+            setIsPlaying(false);
+          }}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onError={(e) => {
+            const a = e.currentTarget;
+            console.error("[AudioPlayer] Failed to load audio.", {
+              src: a.src,
+              networkState: a.networkState,
+              error: a.error?.message ?? a.error?.code,
+            });
+            setHasAudio(false);
+            setIsPlaying(false);
+          }}
+        />
+      )}
+
       {/* ── Top area: Header with Audio Player ── */}
       <div className="flex-shrink-0 relative mx-6 mt-6 rounded-2xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
         {/* decorative gradient strip */}
@@ -1723,9 +1750,28 @@ export default function TranscriptEditorPage() {
                     {formatTimestamp(displaySection.begin_timestamp)} → {formatTimestamp(displaySection.end_timestamp)}
                   </span>
                 </div>
+              ) : hasAudio && isPlaying ? (
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-orange-400 opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-orange-500" />
+                  </span>
+                  <span className="text-xs font-medium text-orange-600 dark:text-orange-400">
+                    Playing audio
+                  </span>
+                  {sections.length === 0 && (
+                    <span className="hidden sm:inline text-[10px] text-zinc-400 dark:text-zinc-500">
+                      — no transcript sections loaded
+                    </span>
+                  )}
+                </div>
+              ) : hasAudio ? (
+                <span className="text-xs text-zinc-400 dark:text-zinc-500 italic">
+                  {sections.length > 0 ? "No section at this time" : "Audio loaded — press play"}
+                </span>
               ) : (
                 <span className="text-xs text-zinc-400 dark:text-zinc-500 italic">
-                  {sections.length > 0 ? "No section at this time" : "No audio loaded"}
+                  No audio file uploaded
                 </span>
               )}
             </div>
@@ -1783,7 +1829,7 @@ export default function TranscriptEditorPage() {
 
       {/* ── Section list ── */}
       <div ref={sectionListRef} className="flex-1 overflow-y-auto px-6 pt-4 pb-6 space-y-2.5">
-        {filteredSections.length === 0 && (
+        {filteredSections.length === 0 && sections.length > 0 && (
           <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-zinc-300 py-16 dark:border-zinc-700">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-10 w-10 text-zinc-300 dark:text-zinc-600">
               <path fillRule="evenodd" d="M10.5 3.75a6.75 6.75 0 1 0 0 13.5 6.75 6.75 0 0 0 0-13.5ZM2.25 10.5a8.25 8.25 0 1 1 14.59 5.28l4.69 4.69a.75.75 0 1 1-1.06 1.06l-4.69-4.69A8.25 8.25 0 0 1 2.25 10.5Z" clipRule="evenodd" />
@@ -1796,6 +1842,35 @@ export default function TranscriptEditorPage() {
             >
               Clear filters
             </button>
+          </div>
+        )}
+
+        {sections.length === 0 && !loading && (
+          <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-zinc-300 py-16 dark:border-zinc-700">
+            {hasAudio ? (
+              <>
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-500/15">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-7 w-7 text-orange-500 dark:text-orange-400">
+                    <path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.318.664-2.66 1.905A9.76 9.76 0 0 0 1.5 12c0 .898.121 1.768.35 2.595.341 1.24 1.518 1.905 2.659 1.905h1.93l4.5 4.5c.945.945 2.561.276 2.561-1.06V4.06ZM18.584 5.106a.75.75 0 0 1 1.06 0c3.808 3.807 3.808 9.98 0 13.788a.75.75 0 0 1-1.06-1.06 8.25 8.25 0 0 0 0-11.668.75.75 0 0 1 0-1.06Z" />
+                    <path d="M15.932 7.757a.75.75 0 0 1 1.061 0 6 6 0 0 1 0 8.486.75.75 0 0 1-1.06-1.061 4.5 4.5 0 0 0 0-6.364.75.75 0 0 1 0-1.06Z" />
+                  </svg>
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">Audio is ready — no transcript sections yet</p>
+                  <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">Use the player above to listen. Transcript sections will appear here once the audio is processed.</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-10 w-10 text-zinc-300 dark:text-zinc-600">
+                  <path fillRule="evenodd" d="M4.848 2.771A49.144 49.144 0 0 1 12 2.25c2.43 0 4.817.178 7.152.52a1.595 1.595 0 0 1 1.348 1.58v7.95c0 .713-.471 1.345-1.152 1.546a48.34 48.34 0 0 0-2.398.757 16.906 16.906 0 0 0-.09.04l-.003.002H16.85l-.004.001a3.482 3.482 0 0 0-.135.071 14.205 14.205 0 0 0-1.534 1.016c-.88.69-1.927 1.716-2.302 3.186a2.27 2.27 0 0 1-.385.82c-.062.072-.169.165-.326.166h-.008c-.157-.001-.264-.094-.326-.166a2.27 2.27 0 0 1-.385-.82c-.375-1.47-1.422-2.497-2.302-3.186a14.205 14.205 0 0 0-1.534-1.016 3.482 3.482 0 0 0-.135-.07l-.004-.002h-.001l-.003-.002a16.906 16.906 0 0 0-.09-.04 48.34 48.34 0 0 0-2.398-.757A1.594 1.594 0 0 1 3.5 12.3V4.35c0-.78.56-1.447 1.348-1.58Z" clipRule="evenodd" />
+                </svg>
+                <div className="text-center">
+                  <p className="text-sm font-medium text-zinc-400 dark:text-zinc-500">No transcript sections loaded</p>
+                  <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">Upload an audio file to get started.</p>
+                </div>
+              </>
+            )}
           </div>
         )}
 

@@ -39,6 +39,23 @@ INSERT INTO public.users_t (
 );
 
 
+INSERT INTO public.lesson_subjects_t
+    (name, description, created, created_by, modified, modified_by, active)
+VALUES
+    ('Math', 'Mathematics and arithmetic', NOW(), 1, NOW(), 1, 1),
+    ('Science', 'General science topics', NOW(), 1, NOW(), 1, 1),
+    ('History', 'Historical events and studies', NOW(), 1, NOW(), 1, 1),
+    ('English', 'English language arts and literature', NOW(), 1, NOW(), 1, 1),
+    ('Reading', 'Reading comprehension and analysis', NOW(), 1, NOW(), 1, 1),
+    ('Writing', 'Writing skills and composition', NOW(), 1, NOW(), 1, 1),
+    ('Social Studies', 'Society, culture, and civics', NOW(), 1, NOW(), 1, 1),
+    ('Art', 'Visual arts and creative expression', NOW(), 1, NOW(), 1, 1),
+    ('Music', 'Music theory and performance', NOW(), 1, NOW(), 1, 1),
+    ('Physical Education', 'Physical fitness and sports', NOW(), 1, NOW(), 1, 1),
+    ('Foreign Language', 'World languages and linguistics', NOW(), 1, NOW(), 1, 1),
+    ('Technology', 'Computer science and technology', NOW(), 1, NOW(), 1, 1);
+
+
 INSERT INTO public.transcript_details_t
 (
     transcription_id,
