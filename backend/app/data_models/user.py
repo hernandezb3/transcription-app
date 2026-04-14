@@ -6,6 +6,7 @@ class UserCreate(BaseModel):
     unique_id: Optional[str] = None
     user_email: Optional[str] = None
     user_name: Optional[str] = None
+    password: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     display_name: Optional[str] = None
@@ -21,3 +22,15 @@ class UserUpdate(BaseModel):
     last_name: Optional[str] = None
     display_name: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
+
+class UserLogin(BaseModel):
+    user_name: str
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user_id: int
+    user_name: str
+    display_name: Optional[str] = None
+    user_email: Optional[str] = None

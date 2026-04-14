@@ -154,7 +154,8 @@ class SQLFactory:
                 response_body['status_code'] = 404
                 response_body['message'] = 'No records were found that match the query criteria.'
             else:
-                data_rows_dict = pd.DataFrame(data_rows).to_dict(orient='records')
+                df = pd.DataFrame(data_rows).astype(object)
+                data_rows_dict = df.where(df.notnull(), None).to_dict(orient='records')
                 response_body['status_code'] = 200
                 response_body['message'] = 'Success'
                 response_body['data'] = data_rows_dict
@@ -207,7 +208,8 @@ class SQLFactory:
                     response_body['status_code'] = 404
                     response_body['message'] = 'No records were found that match the query criteria.'
                 else:
-                    data_rows_dict = pd.DataFrame(data_rows).to_dict(orient='records')
+                    df = pd.DataFrame(data_rows).astype(object)
+                    data_rows_dict = df.where(df.notnull(), None).to_dict(orient='records')
                     response_body['status_code'] = 200
                     response_body['message'] = 'Success'
                     response_body['data'] = data_rows_dict

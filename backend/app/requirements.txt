@@ -3,6 +3,11 @@ fastapi
 uvicorn
 python-multipart
 
+# Authentication - password hashing and JWT
+passlib[bcrypt]
+bcrypt<4.1
+python-jose[cryptography]
+
 #database packages
 SQLAlchemy
 sqlalchemy[asyncio]
@@ -41,7 +46,7 @@ alembic
 psycopg[binary]
 psycopg
 
-nemo-toolkit[asr]
+# nemo-toolkit[asr]
 
 # transformers
 # torch

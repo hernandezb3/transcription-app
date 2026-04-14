@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type DragEvent } from "react";
 import Link from "next/link";
+import RequirePermission from "@/app/components/require-permission";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -116,6 +117,11 @@ export default function ParticipantsPage() {
   const [uploadMessage, setUploadMessage] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  /* transcript file */
+  const [transcriptFile, setTranscriptFile] = useState<File | null>(null);
+  const [isDraggingTranscript, setIsDraggingTranscript] = useState(false);
+  const transcriptFileInputRef = useRef<HTMLInputElement>(null);
+
   /* delete confirmation */
   const [deleteTarget, setDeleteTarget] = useState<Transcript | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -207,7 +213,9 @@ export default function ParticipantsPage() {
     setUploadMicColorId(mcId ?? null);
     setUploadLessonNumber(lesson ?? "");
     setAudioFile(null);
+    setTranscriptFile(null);
     setIsDragging(false);
+    setIsDraggingTranscript(false);
     setUploadStep("idle");
     setUploadMessage("");
     const mcLabel = mcId ? micColors.find((c) => c.id === mcId)?.color ?? "" : "";
@@ -221,7 +229,7 @@ export default function ParticipantsPage() {
     });
   };
 
-  /* drag-and-drop helpers */
+  /* drag-and-drop helpers — audio */
   const onDragOver = (e: DragEvent) => { e.preventDefault(); setIsDragging(true); };
   const onDragLeave = (e: DragEvent) => { e.preventDefault(); setIsDragging(false); };
   const onDrop = (e: DragEvent) => {
@@ -237,6 +245,22 @@ export default function ParticipantsPage() {
     if (file) setAudioFile(file);
   };
 
+  /* drag-and-drop helpers — transcript */
+  const onDragOverTranscript = (e: DragEvent) => { e.preventDefault(); setIsDraggingTranscript(true); };
+  const onDragLeaveTranscript = (e: DragEvent) => { e.preventDefault(); setIsDraggingTranscript(false); };
+  const onDropTranscript = (e: DragEvent) => {
+    e.preventDefault();
+    setIsDraggingTranscript(false);
+    const file = e.dataTransfer.files[0];
+    if (file && (file.type === "text/plain" || file.name.toLowerCase().endsWith(".txt"))) {
+      setTranscriptFile(file);
+    }
+  };
+  const onTranscriptFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) setTranscriptFile(file);
+  };
+
   const handleCreate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!uploadForParticipant) return;
@@ -247,8 +271,17 @@ export default function ParticipantsPage() {
 
     try {
       /* Step 1 — create transcript metadata */
+      const mcLabel = createForm.microphone_color_id
+        ? micColors.find((c) => c.id === Number(createForm.microphone_color_id))?.color ?? ""
+        : "";
+      const autoTitle = [
+        uploadForParticipant.name ?? "Participant",
+        mcLabel ? `${mcLabel} Mic` : "",
+        createForm.lesson_number.trim() ? `Lesson ${createForm.lesson_number.trim()}` : "",
+      ].filter(Boolean).join(" — ");
+
       const payload: Record<string, unknown> = {
-        title: createForm.title.trim(),
+        title: autoTitle || createForm.title.trim(),
         description: createForm.description.trim() || null,
         participant_id: uploadForParticipant.id,
         lesson_number: createForm.lesson_number.trim() || null,
@@ -266,12 +299,13 @@ export default function ParticipantsPage() {
       const created = (await res.json()) as { id?: number; data?: { id?: number } };
       const newId = created.id ?? created.data?.id;
 
-      /* Step 2 — upload audio file (if one was selected) */
-      if (audioFile && newId) {
+      /* Step 2 — upload audio + transcript files (if both were selected) */
+      if (audioFile && transcriptFile && newId) {
         setUploadStep("uploading");
-        setUploadMessage(`Uploading ${audioFile.name}…`);
+        setUploadMessage(`Uploading ${audioFile.name} + ${transcriptFile.name}…`);
         const form = new FormData();
-        form.append("file", audioFile);
+        form.append("audio_file", audioFile);
+        form.append("transcript_file", transcriptFile);
 
         const uploadRes = await fetch(`/api/transcripts/${newId}/upload-audio`, {
           method: "POST",
@@ -279,7 +313,7 @@ export default function ParticipantsPage() {
         });
         if (!uploadRes.ok) {
           // Transcript was created but upload failed — still reload
-          console.error("Audio upload failed", await uploadRes.text());
+          console.error("Upload failed", await uploadRes.text());
         }
       }
 
@@ -514,6 +548,7 @@ export default function ParticipantsPage() {
   };
 
   return (
+    <RequirePermission permission="participants.read">
     <section className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold">Research Study Participant Tracker</h2>
@@ -632,225 +667,285 @@ export default function ParticipantsPage() {
 
       {/* ---- Upload / Create Transcript dialog ---- */}
       {uploadForParticipant && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-          <div className="w-full max-w-xl overflow-hidden rounded-lg bg-white shadow-xl dark:bg-zinc-900">
-            <div className="relative bg-gradient-to-r from-sky-600 to-cyan-600 px-5 py-3">
-              <h3 className="text-center text-lg font-semibold text-white">
-                Upload Transcript — {uploadForParticipant.name}
-                {uploadMicColorId && (
-                  <span className="ml-1 text-sm font-normal text-white/80">
-                    · {micColors.find((c) => c.id === uploadMicColorId)?.color} Mic
-                  </span>
-                )}
-                {uploadLessonNumber && (
-                  <span className="ml-1 text-sm font-normal text-white/80">
-                    · Lesson {uploadLessonNumber}
-                  </span>
-                )}
+        <div className="animate-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
+          <div className="animate-modal-slide-up w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 dark:bg-zinc-900 dark:ring-white/10">
+            {/* ---- Header ---- */}
+            <div className="relative overflow-hidden bg-gradient-to-br from-sky-600 via-cyan-600 to-teal-500 px-6 py-4">
+              <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-white/10 blur-2xl" />
+              <div className="absolute -left-4 bottom-0 h-16 w-16 rounded-full bg-white/10 blur-xl" />
+              <h3 className="relative text-center text-lg font-semibold tracking-tight text-white">
+                Upload Lesson
               </h3>
+              <p className="relative mt-0.5 text-center text-xs text-white/70">
+                {uploadForParticipant.name ?? "Participant"}
+              </p>
               <button
                 type="button"
                 onClick={() => setUploadForParticipant(null)}
                 disabled={isCreating}
                 aria-label="Close"
-                className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-white/35 bg-white/15 text-sm leading-none text-white/95 backdrop-blur-sm transition hover:bg-white/25 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/60 disabled:cursor-not-allowed disabled:opacity-60"
+                className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-white/10 text-sm leading-none text-white/90 backdrop-blur-sm transition-all hover:bg-white/25 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-white/50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 ✕
               </button>
             </div>
 
-            {/* ---- Uploading overlay ---- */}
+            {/* ---- Upload progress overlay ---- */}
             {isCreating && (
-              <div className="flex flex-col items-center justify-center px-8 py-16">
-                <div className="relative mb-6">
-                  <svg className="h-20 w-20 animate-spin text-sky-500" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                    <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <svg className="h-8 w-8 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.338-2.32 3.75 3.75 0 013.57 5.595H6.75z" />
-                    </svg>
+              <div className="flex flex-col items-center justify-center px-8 py-14">
+                {/* Step indicators */}
+                <div className="mb-8 flex items-center gap-3">
+                  {[
+                    { key: "creating", label: "Create" },
+                    { key: "uploading", label: "Upload" },
+                    { key: "done", label: "Done" },
+                  ].map((s, i, arr) => {
+                    const steps = ["creating", "uploading", "done"];
+                    const currentIdx = steps.indexOf(uploadStep);
+                    const stepIdx = steps.indexOf(s.key);
+                    const isComplete = stepIdx < currentIdx || uploadStep === "done";
+                    const isCurrent = stepIdx === currentIdx && uploadStep !== "done";
+                    return (
+                      <div key={s.key} className="flex items-center gap-3">
+                        <div className="flex flex-col items-center">
+                          <div
+                            className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-all duration-500 ${
+                              isComplete
+                                ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/30"
+                                : isCurrent
+                                  ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30 ring-4 ring-sky-500/20"
+                                  : "bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500"
+                            }`}
+                          >
+                            {isComplete ? (
+                              <svg className="h-4 w-4 animate-check-pop" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            ) : (
+                              i + 1
+                            )}
+                          </div>
+                          <span className={`mt-1.5 text-[10px] font-medium ${isCurrent ? "text-sky-600 dark:text-sky-400" : isComplete ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400 dark:text-zinc-500"}`}>
+                            {s.label}
+                          </span>
+                        </div>
+                        {i < arr.length - 1 && (
+                          <div className={`mb-4 h-0.5 w-10 rounded-full transition-all duration-500 ${stepIdx < currentIdx ? "bg-emerald-400" : "bg-zinc-200 dark:bg-zinc-700"}`} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Animated icon */}
+                <div className="relative mb-5">
+                  <div className="animate-pulse-ring absolute inset-0 rounded-full bg-sky-400/30" style={{ margin: "-12px" }} />
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-cyan-500 shadow-xl shadow-sky-500/25">
+                    {uploadStep === "done" ? (
+                      <svg className="h-8 w-8 text-white animate-check-pop" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="h-7 w-7 text-white animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.338-2.32 3.75 3.75 0 013.57 5.595H6.75z" />
+                      </svg>
+                    )}
                   </div>
                 </div>
-                <h4 className="text-lg font-semibold text-zinc-700 dark:text-zinc-200">
-                  {uploadStep === "uploading" ? "Uploading Audio…" : "Creating Transcript…"}
+
+                <h4 className="text-base font-semibold text-zinc-700 dark:text-zinc-200">
+                  {uploadStep === "uploading" ? "Uploading files…" : uploadStep === "done" ? "All done!" : "Setting things up…"}
                 </h4>
+                <p className="mt-1 text-xs text-zinc-400">{uploadMessage}</p>
+
+                {/* Progress bar shimmer */}
+                {uploadStep !== "done" && (
+                  <div className="mt-6 h-1.5 w-48 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                    <div className="animate-shimmer h-full w-full rounded-full bg-gradient-to-r from-sky-500 via-cyan-400 to-sky-500" style={{ backgroundSize: "200% 100%" }} />
+                  </div>
+                )}
               </div>
             )}
 
             {/* ---- Normal form (hidden while uploading) ---- */}
             {!isCreating && (
-            <form onSubmit={handleCreate} className="space-y-4 p-5">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className="block space-y-1 text-sm sm:col-span-2">
-                  <span className="text-zinc-600 dark:text-zinc-300">
-                    Title *
-                  </span>
-                  <input
-                    type="text"
-                    required
-                    value={createForm.title}
-                    onChange={(e) =>
-                      setCreateForm((f) => ({ ...f, title: e.target.value }))
-                    }
-                    className="w-full rounded border border-zinc-300 px-2.5 py-2 text-zinc-800 focus:border-sky-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
-                  />
-                </label>
-
-                <label className="block space-y-1 text-sm sm:col-span-2">
-                  <span className="text-zinc-600 dark:text-zinc-300">
-                    Description
-                  </span>
-                  <textarea
-                    rows={2}
-                    value={createForm.description}
-                    onChange={(e) =>
-                      setCreateForm((f) => ({
-                        ...f,
-                        description: e.target.value,
-                      }))
-                    }
-                    className="w-full rounded border border-zinc-300 px-2.5 py-2 text-zinc-800 focus:border-sky-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
-                  />
-                </label>
-
-                <label className="block space-y-1 text-sm">
-                  <span className="text-zinc-600 dark:text-zinc-300">
-                    Lesson Number
-                  </span>
+            <form onSubmit={handleCreate} className="space-y-5 px-6 py-5">
+              {/* ---- Lesson Number + Subject row ---- */}
+              <div className="grid grid-cols-2 gap-4">
+                <label className="group block space-y-1.5 text-sm">
+                  <span className="font-medium text-zinc-600 dark:text-zinc-400 group-focus-within:text-sky-600 dark:group-focus-within:text-sky-400 transition-colors">Lesson #</span>
                   <input
                     type="text"
                     value={createForm.lesson_number}
                     onChange={(e) =>
-                      setCreateForm((f) => ({
-                        ...f,
-                        lesson_number: e.target.value,
-                      }))
+                      setCreateForm((f) => ({ ...f, lesson_number: e.target.value }))
                     }
-                    className="w-full rounded border border-zinc-300 px-2.5 py-2 text-zinc-800 focus:border-sky-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                    placeholder="e.g. 1"
+                    className="w-full rounded-lg border border-zinc-200 bg-zinc-50/50 px-3.5 py-2.5 text-sm text-zinc-800 shadow-sm transition-all placeholder:text-zinc-400 focus:border-sky-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200 dark:focus:border-sky-500 dark:focus:bg-zinc-800 dark:focus:ring-sky-500/20"
                   />
                 </label>
 
-                <label className="block space-y-1 text-sm">
-                  <span className="text-zinc-600 dark:text-zinc-300">
-                    Lesson Subject
-                  </span>
+                <label className="group block space-y-1.5 text-sm">
+                  <span className="font-medium text-zinc-600 dark:text-zinc-400 group-focus-within:text-sky-600 dark:group-focus-within:text-sky-400 transition-colors">Subject</span>
                   <select
                     value={createForm.lesson_subject}
                     onChange={(e) =>
-                      setCreateForm((f) => ({
-                        ...f,
-                        lesson_subject: e.target.value,
-                      }))
+                      setCreateForm((f) => ({ ...f, lesson_subject: e.target.value }))
                     }
-                    className="w-full rounded border border-zinc-300 px-2.5 py-2 text-zinc-800 focus:border-sky-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                    className="w-full rounded-lg border border-zinc-200 bg-zinc-50/50 px-3.5 py-2.5 text-sm text-zinc-800 shadow-sm transition-all focus:border-sky-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200 dark:focus:border-sky-500 dark:focus:bg-zinc-800 dark:focus:ring-sky-500/20"
                   >
-                    <option value="">Select a subject…</option>
+                    <option value="">Select…</option>
                     {lessonSubjects.map((ls) => (
-                      <option key={ls.id} value={ls.name ?? ""}>
-                        {ls.name}
-                      </option>
+                      <option key={ls.id} value={ls.name ?? ""}>{ls.name}</option>
                     ))}
                   </select>
                 </label>
+              </div>
 
-                <label className="block space-y-1 text-sm">
-                  <span className="text-zinc-600 dark:text-zinc-300">
-                    Microphone Color
-                  </span>
-                  <select
-                    value={createForm.microphone_color_id}
-                    onChange={(e) =>
-                      setCreateForm((f) => ({
-                        ...f,
-                        microphone_color_id: e.target.value,
-                      }))
-                    }
-                    className="w-full cursor-pointer rounded border border-zinc-300 bg-white px-2.5 py-2 text-zinc-800 focus:border-sky-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
-                  >
-                    <option value="">— Select —</option>
-                    {micColors.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.color} — {c.description ?? ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              {/* ---- Microphone Color ---- */}
+              <div className="space-y-2">
+                <span className="block text-sm font-medium text-zinc-600 dark:text-zinc-400">Microphone</span>
+                <div className="flex flex-wrap gap-2">
+                  {micColors.map((c) => {
+                    const isSelected = createForm.microphone_color_id === String(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setCreateForm((f) => ({ ...f, microphone_color_id: String(c.id) }))}
+                        className={`inline-flex cursor-pointer items-center gap-2 rounded-full border px-3.5 py-2 text-sm transition-all duration-200 ${
+                          isSelected
+                            ? "border-sky-400 bg-sky-50 font-medium text-sky-700 shadow-sm shadow-sky-500/10 ring-1 ring-sky-400 dark:border-sky-500 dark:bg-sky-900/30 dark:text-sky-300"
+                            : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 hover:shadow-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:bg-zinc-700/80"
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 rounded-full shadow-sm ring-1 ring-black/10 transition-transform ${isSelected ? "scale-110" : ""}`}
+                          style={{ backgroundColor: c.color?.toLowerCase() ?? "transparent" }}
+                        />
+                        {c.color}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
-                {/* ---- MP3 drag-and-drop zone ---- */}
-                <div className="sm:col-span-2">
-                  <span className="mb-1 block text-sm text-zinc-600 dark:text-zinc-300">
-                    Audio File (MP3)
-                  </span>
-                  <div
-                    onDragOver={onDragOver}
-                    onDragLeave={onDragLeave}
-                    onDrop={onDrop}
-                    onClick={() => fileInputRef.current?.click()}
-                    className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-4 py-6 transition-colors ${
-                      isDragging
-                        ? "border-sky-400 bg-sky-50 dark:border-sky-500 dark:bg-sky-900/20"
-                        : audioFile
-                          ? "border-green-400 bg-green-50 dark:border-green-600 dark:bg-green-900/20"
-                          : "border-zinc-300 bg-zinc-50 hover:border-sky-300 hover:bg-sky-50/50 dark:border-zinc-700 dark:bg-zinc-800/50 dark:hover:border-sky-600"
-                    }`}
-                  >
-                    {audioFile ? (
-                      <>
-                        <svg className="mb-1.5 h-8 w-8 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              {/* ---- File upload zones ---- */}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Audio MP3 */}
+                <div
+                  onDragOver={onDragOver}
+                  onDragLeave={onDragLeave}
+                  onDrop={onDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-3 py-6 text-center transition-all duration-200 ${
+                    isDragging
+                      ? "border-sky-400 bg-sky-50/80 shadow-inner dark:border-sky-500 dark:bg-sky-900/20"
+                      : audioFile
+                        ? "border-emerald-400 bg-emerald-50/50 dark:border-emerald-500 dark:bg-emerald-900/20"
+                        : "border-zinc-200 bg-zinc-50/50 hover:border-sky-300 hover:bg-sky-50/30 dark:border-zinc-700 dark:bg-zinc-800/30 dark:hover:border-sky-600 dark:hover:bg-sky-900/10"
+                  }`}
+                >
+                  {audioFile ? (
+                    <>
+                      <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40">
+                        <svg className="h-5 w-5 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        <p className="text-sm font-medium text-green-700 dark:text-green-300">
-                          {audioFile.name}
-                        </p>
-                        <p className="mt-0.5 text-xs text-zinc-500">
-                          {(audioFile.size / (1024 * 1024)).toFixed(1)} MB — click or drop to replace
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <svg className="mb-1.5 h-8 w-8 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      </div>
+                      <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 truncate max-w-full">{audioFile.name}</p>
+                      <p className="mt-0.5 text-[10px] text-zinc-400">{(audioFile.size / (1024 * 1024)).toFixed(1)} MB</p>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setAudioFile(null); }}
+                        className="mt-1.5 cursor-pointer text-[10px] font-medium text-zinc-400 underline decoration-zinc-300 underline-offset-2 hover:text-red-500 hover:decoration-red-300 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 transition-colors group-hover:bg-sky-100 dark:bg-zinc-800 dark:group-hover:bg-sky-900/30">
+                        <svg className="h-5 w-5 text-zinc-400 transition-colors group-hover:text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.338-2.32 3.75 3.75 0 013.57 5.595H6.75z" />
                         </svg>
-                        <p className="text-sm font-medium text-zinc-600 dark:text-zinc-300">
-                          Drop MP3 here or click to browse
-                        </p>
-                        <p className="mt-0.5 text-xs text-zinc-400">
-                          Accepted format: .mp3
-                        </p>
-                      </>
-                    )}
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".mp3,audio/mpeg"
-                      onChange={onFileSelect}
-                      className="hidden"
-                    />
-                  </div>
+                      </div>
+                      <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Audio</p>
+                      <p className="mt-0.5 text-[10px] text-zinc-400">.mp3 · Drop or click</p>
+                    </>
+                  )}
+                  <input ref={fileInputRef} type="file" accept=".mp3,audio/mpeg" onChange={onFileSelect} className="hidden" />
+                </div>
+
+                {/* Transcript TXT */}
+                <div
+                  onDragOver={onDragOverTranscript}
+                  onDragLeave={onDragLeaveTranscript}
+                  onDrop={onDropTranscript}
+                  onClick={() => transcriptFileInputRef.current?.click()}
+                  className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-3 py-6 text-center transition-all duration-200 ${
+                    isDraggingTranscript
+                      ? "border-sky-400 bg-sky-50/80 shadow-inner dark:border-sky-500 dark:bg-sky-900/20"
+                      : transcriptFile
+                        ? "border-emerald-400 bg-emerald-50/50 dark:border-emerald-500 dark:bg-emerald-900/20"
+                        : "border-zinc-200 bg-zinc-50/50 hover:border-sky-300 hover:bg-sky-50/30 dark:border-zinc-700 dark:bg-zinc-800/30 dark:hover:border-sky-600 dark:hover:bg-sky-900/10"
+                  }`}
+                >
+                  {transcriptFile ? (
+                    <>
+                      <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40">
+                        <svg className="h-5 w-5 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 truncate max-w-full">{transcriptFile.name}</p>
+                      <p className="mt-0.5 text-[10px] text-zinc-400">{(transcriptFile.size / 1024).toFixed(1)} KB</p>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setTranscriptFile(null); }}
+                        className="mt-1.5 cursor-pointer text-[10px] font-medium text-zinc-400 underline decoration-zinc-300 underline-offset-2 hover:text-red-500 hover:decoration-red-300 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 transition-colors group-hover:bg-sky-100 dark:bg-zinc-800 dark:group-hover:bg-sky-900/30">
+                        <svg className="h-5 w-5 text-zinc-400 transition-colors group-hover:text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                        </svg>
+                      </div>
+                      <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Transcript</p>
+                      <p className="mt-0.5 text-[10px] text-zinc-400">.txt · Drop or click</p>
+                    </>
+                  )}
+                  <input ref={transcriptFileInputRef} type="file" accept=".txt,text/plain" onChange={onTranscriptFileSelect} className="hidden" />
                 </div>
               </div>
 
               {uploadStep === "error" && (
-                <div className="rounded bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                  <svg className="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                  </svg>
                   {uploadMessage}
                 </div>
               )}
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+              <div className="flex items-center justify-end gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
                 <button
                   type="button"
                   onClick={() => setUploadForParticipant(null)}
-                  className="cursor-pointer rounded border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  className="cursor-pointer rounded-lg px-5 py-2.5 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="cursor-pointer rounded bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700"
+                  disabled={!audioFile || !transcriptFile}
+                  className="cursor-pointer rounded-lg bg-gradient-to-r from-sky-600 to-cyan-600 px-8 py-2.5 text-sm font-semibold text-white shadow-md shadow-sky-500/20 transition-all hover:shadow-lg hover:shadow-sky-500/30 hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-sky-500/50 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:brightness-100 dark:focus:ring-offset-zinc-900"
                 >
-                  {audioFile ? "Create & Upload" : "Create Transcript"}
+                  Upload
                 </button>
               </div>
             </form>
@@ -861,10 +956,11 @@ export default function ParticipantsPage() {
 
       {/* ---- Add Participant dialog ---- */}
       {showAddParticipant && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-          <div className="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-xl dark:bg-zinc-900">
-            <div className="relative bg-gradient-to-r from-sky-600 to-cyan-600 px-5 py-3">
-              <h3 className="text-center text-lg font-semibold text-white">
+        <div className="animate-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
+          <div className="animate-modal-slide-up w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 dark:bg-zinc-900 dark:ring-white/10">
+            <div className="relative overflow-hidden bg-gradient-to-br from-sky-600 via-cyan-600 to-teal-500 px-6 py-4">
+              <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-white/10 blur-2xl" />
+              <h3 className="relative text-center text-lg font-semibold tracking-tight text-white">
                 Add Participant
               </h3>
               <button
@@ -872,7 +968,7 @@ export default function ParticipantsPage() {
                 onClick={() => setShowAddParticipant(false)}
                 disabled={isAddingParticipant}
                 aria-label="Close"
-                className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-white/35 bg-white/15 text-sm leading-none text-white/95 backdrop-blur-sm transition hover:bg-white/25 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/60 disabled:cursor-not-allowed disabled:opacity-60"
+                className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-white/10 text-sm leading-none text-white/90 backdrop-blur-sm transition-all hover:bg-white/25 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-white/50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 ✕
               </button>
@@ -994,5 +1090,6 @@ export default function ParticipantsPage() {
         </div>
       )}
     </section>
+    </RequirePermission>
   );
 }

@@ -1,7 +1,11 @@
 from typing import Any, List
 
+from app.mappers.shared import SharedMapper
+
 
 class TranscriptionMapper:
+    _shared = SharedMapper()
+
     @staticmethod
     def parse_tags(value: Any) -> List[str]:
         """Accept CSV string or list and always return a clean list of tags."""
@@ -21,6 +25,8 @@ class TranscriptionMapper:
     @staticmethod
     def to_transcript_details(row: dict) -> dict:
         """Map DB row payload into API-friendly transcript details payload."""
-        mapped = dict(row)
+        mapped = TranscriptionMapper._shared.normalize_nulls(dict(row))
         mapped["tags"] = TranscriptionMapper.parse_tags(mapped.get("tags"))
+        # Ensure speaker_id is forwarded even when absent
+        mapped.setdefault("speaker_id", None)
         return mapped

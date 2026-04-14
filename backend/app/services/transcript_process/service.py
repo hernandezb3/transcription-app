@@ -1,15 +1,13 @@
 import os
-import shutil
-from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 from fastapi import UploadFile
 
 from app.config.app_logging import AppLogging
 from app.infrastructure.storage.factory import StorageFactory
 from app.repositories.transcription.controller import TranscriptRepository
+from app.repositories.transcription.transcript_speakers import TranscriptSpeakersRepository
 from app.repositories.transcripts.transcript_files import TranscriptFilesRepository
-from app.services.transcript_process.audio_analyzer import analyze_audio, format_timestamp
+from app.services.transcript_process.transcript_parser import parse_transcript_file, format_timestamp
 
 
 class TranscriptProcessService:
@@ -17,18 +15,16 @@ class TranscriptProcessService:
         self.storage = StorageFactory()
         self.file_repo = TranscriptFilesRepository()
         self.transcript_repo = TranscriptRepository()
+        self.speakers_repo = TranscriptSpeakersRepository()
         self.logger = AppLogging().logger
 
     @staticmethod
-    def _get_working_directory(transcription_id: int) -> Path:
-        return (Path.cwd() / "tmp" / "transcript_process" / str(transcription_id)).resolve()
-
-    @staticmethod
-    def _build_transcript_sections(transcription_id: int, parsed: dict) -> list[dict]:
+    def _build_transcript_sections(transcription_id: int, parsed: dict, speaker_id_map: dict) -> list[dict]:
         return [
             {
                 "transcription_id": transcription_id,
                 "section_id": index,
+                "speaker_id": speaker_id_map.get(segment.get("speaker")),
                 "speaker": segment.get("speaker"),
                 "begin_timestamp": format_timestamp(segment["start"]),
                 "end_timestamp": format_timestamp(segment["end"]),
@@ -39,8 +35,25 @@ class TranscriptProcessService:
             for index, segment in enumerate(parsed.get("combined_diarized_segments", []), start=1)
         ]
 
+    async def _create_speakers(self, transcription_id: int, parsed: dict) -> dict:
+        """
+        Extract unique speaker labels from the parsed output, create rows in
+        transcript_speakers_t and return a mapping {label: speaker_id}.
+        """
+        segments = parsed.get("combined_diarized_segments", [])
+        unique_labels = list(dict.fromkeys(seg.get("speaker") for seg in segments if seg.get("speaker")))
+        speaker_id_map: dict[str, int] = {}
+        for label in unique_labels:
+            speaker_id = await self.speakers_repo.aget_or_create(transcription_id, label)
+            speaker_id_map[label] = speaker_id
+        return speaker_id_map
+
     async def _replace_transcript_details(self, transcription_id: int, parsed: dict):
-        sections = self._build_transcript_sections(transcription_id, parsed)
+        # Deactivate old speakers and create fresh ones
+        await self.speakers_repo.adeactivate_by_transcript(transcription_id)
+        speaker_id_map = await self._create_speakers(transcription_id, parsed)
+
+        sections = self._build_transcript_sections(transcription_id, parsed, speaker_id_map)
         await self.transcript_repo.adeactivate_by_transcript(transcription_id)
 
         for section in sections:
@@ -50,62 +63,64 @@ class TranscriptProcessService:
 
         return sections
 
-    def _write_temp_audio(self, file_bytes: bytes, suffix: str) -> Path:
-        tmp_file = NamedTemporaryFile(delete=False, suffix=suffix)
-        try:
-            tmp_file.write(file_bytes)
-            tmp_file.flush()
-        finally:
-            tmp_file.close()
-        return Path(tmp_file.name)
-
-    async def upload_audio(self, transcription_id: int, file: UploadFile, user_id: int = 1):
+    async def upload_transcript(
+        self,
+        transcription_id: int,
+        audio_file: UploadFile,
+        transcript_file: UploadFile,
+        user_id: int = 1,
+    ):
         """
-        Upload an audio file, generate transcript details, and persist both file and transcript metadata.
+        Upload an audio file together with a pre-made transcript text file.
 
         Steps:
-            1. Read file bytes from the upload
-            2. Transcribe and diarize the audio from a temp file
-            3. Upload to blob storage via StorageFactory
-            4. Insert a record into transcript_files_t via the repository
-            5. Replace transcript_details_t rows for the transcript
+            1. Read both files
+            2. Parse the transcript text into speaker/timestamp segments
+            3. Upload the audio to blob storage
+            4. Record file metadata in transcript_files_t
+            5. Replace transcript_details_t rows with parsed segments
         """
-        file_bytes = await file.read()
-        if not file_bytes:
-            raise ValueError("Uploaded file is empty (0 bytes)")
+        # -- read audio --
+        audio_bytes = await audio_file.read()
+        if not audio_bytes:
+            raise ValueError("Uploaded audio file is empty (0 bytes)")
 
-        file_name = file.filename or f"transcript_{transcription_id}.wav"
-        file_ext = os.path.splitext(file_name)[1].lstrip(".")
-        blob_path = f"audio/{transcription_id}.{file_ext}"
-        temp_audio_path = self._write_temp_audio(file_bytes, f".{file_ext}" if file_ext else "")
-        working_dir = self._get_working_directory(transcription_id)
+        # -- read & parse transcript --
+        transcript_bytes = await transcript_file.read()
+        if not transcript_bytes:
+            raise ValueError("Uploaded transcript file is empty (0 bytes)")
 
+        transcript_text = transcript_bytes.decode("utf-8")
         try:
-            working_dir.mkdir(parents=True, exist_ok=True)
-            parsed = analyze_audio(temp_audio_path, working_dir)
+            parsed = parse_transcript_file(transcript_text)
         except Exception as e:
-            self.logger.error(f"Failed to generate transcript details: {e}")
-            raise
-        finally:
-            try:
-                temp_audio_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            shutil.rmtree(working_dir, ignore_errors=True)
+            self.logger.error(f"Failed to parse transcript file: {e}")
+            raise ValueError(f"Could not parse transcript file: {e}")
 
-        # Upload to blob storage
+        segments = parsed.get("combined_diarized_segments", [])
+        if not segments:
+            raise ValueError(
+                "No transcript segments found. Expected format:\n"
+                "speaker timestamp\ntext\n\nspeaker timestamp\ntext"
+            )
+
+        # -- upload audio to blob storage --
+        audio_name = audio_file.filename or f"transcript_{transcription_id}.wav"
+        audio_ext = os.path.splitext(audio_name)[1].lstrip(".")
+        blob_path = f"audio/{transcription_id}.{audio_ext}"
+
         try:
-            self.storage.upload(file_bytes, blob_path)
+            self.storage.upload(audio_bytes, blob_path)
             self.logger.info(f"Uploaded audio file to blob: {blob_path}")
         except Exception as e:
             self.logger.error(f"Failed to upload audio to blob storage: {e}")
             raise
 
-        # Record file metadata in the database
+        # -- record audio file metadata --
         file_record = {
             "transcription_id": transcription_id,
-            "file_name": file_name,
-            "file_type": file_ext,
+            "file_name": audio_name,
+            "file_type": audio_ext,
             "file_path": blob_path,
             "created_by": user_id,
         }
@@ -113,6 +128,7 @@ class TranscriptProcessService:
         if result.get("status_code", 500) >= 400:
             raise RuntimeError(result.get("message", "Failed to create transcript file record"))
 
+        # -- persist transcript sections --
         sections = await self._replace_transcript_details(transcription_id, parsed)
 
         result["data"] = {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import RequirePermission from "@/app/components/require-permission";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -26,6 +27,7 @@ type LessonSubjectPayload = {
 
 export default function LessonSubjectsPage() {
   return (
+    <RequirePermission permission="settings.read">
     <section className="flex h-full min-h-0 flex-col overflow-hidden">
       <h2 className="text-2xl font-semibold">Lesson Subjects</h2>
 
@@ -33,6 +35,7 @@ export default function LessonSubjectsPage() {
         <LessonSubjectsPanel />
       </div>
     </section>
+    </RequirePermission>
   );
 }
 

@@ -1,1399 +1,964 @@
-"use client";
+﻿"use client";
 
-import { useEffect, useState, useRef, useCallback, type KeyboardEvent } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
+import MentionTextarea from "./editor/components/mention-textarea";
+import MentionText from "@/app/components/mention-text";
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
+/* ── Types ── */
 
-type TranscriptSection = {
+interface OverviewSpeaker {
   id: number;
-  transcription_id: number;
-  section_id: number;
-  speaker: string | null;
-  begin_timestamp: string | null;
-  end_timestamp: string | null;
-  original_text: string | null;
-  edited_text: string | null;
-  tags: string[];
-  is_active: number;
-};
+  display_name: string | null;
+  speaker_label: string | null;
+  section_count: number;
+}
 
-type TranscriptComment = {
+interface ActivityEntry {
   id: number;
-  transcription_id: number;
+  action: string;
   section_id: number | null;
-  comment: string | null;
+  summary: string | null;
+  user_display_name: string | null;
+  created_at: string | null;
+}
+
+interface RecentComment {
+  id: number;
+  section_id: number;
+  comment: string;
+  user_display_name: string | null;
+  created_at: string | null;
+}
+
+interface TodoItem {
+  id: number;
+  transcription_id: number;
+  title: string;
+  is_completed: number;
+  sort_order: number;
   created_by: number | null;
   created_at: string | null;
-  is_active: number;
+  completed_at: string | null;
+}
+
+interface TranscriptOverview {
+  id: number;
+  title: string | null;
+  description: string | null;
+  status: string | null;
+  lesson_subject: string | null;
+  lesson_number: string | null;
+  tags: string[];
+  created: string | null;
+  modified: string | null;
+  total_sections: number;
+  edited_sections: number;
+  total_speakers: number;
+  total_comments: number;
+  total_duration: string | null;
+  speakers: OverviewSpeaker[];
+  recent_activity: ActivityEntry[];
+  recent_comments: RecentComment[];
+}
+
+interface ThreadItem {
+  id: number;
+  transcription_id: number;
+  title: string;
+  created_by: number | null;
+  created_by_name: string | null;
+  created_at: string | null;
+  post_count: number;
+  latest_post_at: string | null;
+}
+
+interface PostItem {
+  id: number;
+  thread_id: number;
+  parent_post_id: number | null;
+  body: string;
+  created_by: number | null;
+  created_by_name: string | null;
+  created_at: string | null;
+  edited_at: string | null;
+}
+
+interface PostSearchHit {
+  id: number;
+  thread_id: number;
+  thread_title: string;
+  body: string;
+  created_by: number | null;
+  created_by_name: string | null;
+  created_at: string | null;
+}
+
+/* ── Helpers ── */
+
+function getSpeakerInitials(speaker: string | null) {
+  if (!speaker) return "?";
+  return speaker.split(/[\s_-]+/).map((w) => w[0]).join("").toUpperCase().slice(0, 2);
+}
+
+const ACTION_LABELS: Record<string, { label: string; color: string }> = {
+  section_edited: { label: "Edited section", color: "text-amber-600 dark:text-amber-400" },
+  section_added: { label: "Added section", color: "text-emerald-600 dark:text-emerald-400" },
+  section_deleted: { label: "Deleted section", color: "text-red-500 dark:text-red-400" },
+  comment_added: { label: "Added comment", color: "text-sky-600 dark:text-sky-400" },
 };
 
-type EditingState = {
-  sectionId: number;
-  field: "speaker" | "edited_text";
-} | null;
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
-
-/** Convert "00:01:23" or "83" (seconds) into seconds number. */
-function timestampToSeconds(ts: string | null): number {
-  if (!ts) return 0;
-  const parts = ts.split(":").map(Number);
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
-  return Number(ts) || 0;
+function relativeTime(dateStr: string | null): string {
+  if (!dateStr) return "";
+  // Backend stores naive UTC timestamps – append 'Z' so JS treats them as UTC
+  const utcStr = /[Z+-]\d{0,4}$/.test(dateStr) ? dateStr : dateStr + "Z";
+  const diff = Date.now() - new Date(utcStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
 }
 
-function formatTimestamp(ts: string | null): string {
-  if (!ts) return "00:00";
-  return ts;
-}
+/* ================================================================== */
+/*  Todo List component                                                */
+/* ================================================================== */
 
-/** Convert a number of seconds to a display string like 1:23 or 1:02:03 */
-function formatSecondsToTime(totalSec: number): string {
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = Math.floor(totalSec % 60);
-  if (h > 0) return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Search‑highlight helper                                            */
-/* ------------------------------------------------------------------ */
-
-function HighlightText({
-  text,
-  query,
-  matchOffset = 0,
-  activeMatchIndex = -1,
-}: {
-  text: string;
-  query: string;
-  matchOffset?: number;
-  activeMatchIndex?: number;
-}) {
-  if (!query) return <>{text}</>;
-  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`(${escaped})`, "gi");
-  const parts = text.split(regex);
-  let matchCounter = matchOffset;
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (regex.test(part)) {
-          const idx = matchCounter++;
-          const isActive = idx === activeMatchIndex;
-          return (
-            <mark
-              key={i}
-              data-search-match={idx}
-              className={`rounded-sm px-0.5 transition-colors ${
-                isActive
-                  ? "bg-orange-400 text-white ring-2 ring-orange-400/50 dark:bg-orange-500 dark:ring-orange-500/50"
-                  : "bg-amber-200 text-amber-900 dark:bg-amber-500/30 dark:text-amber-200"
-              }`}
-            >
-              {part}
-            </mark>
-          );
-        }
-        return <span key={i}>{part}</span>;
-      })}
-    </>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Inline‑edit component                                              */
-/* ------------------------------------------------------------------ */
-
-function InlineEdit({
-  value,
-  onSave,
-  onEditStart,
-  multiline = false,
-  className = "",
-  highlight = "",
-  matchOffset = 0,
-  activeMatchIndex = -1,
-}: {
-  value: string;
-  onSave: (v: string) => void;
-  onEditStart?: () => void;
-  multiline?: boolean;
-  className?: string;
-  highlight?: string;
-  matchOffset?: number;
-  activeMatchIndex?: number;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    if (editing) inputRef.current?.focus();
-  }, [editing]);
-
-  useEffect(() => {
-    setDraft(value);
-  }, [value]);
-
-  const commit = () => {
-    setEditing(false);
-    if (draft !== value) onSave(draft);
-  };
-
-  const cancel = () => {
-    setDraft(value);
-    setEditing(false);
-  };
-
-  const handleKey = (e: KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.altKey) {
-      e.preventDefault();
-      commit();
-    }
-    if (e.key === "Escape") cancel();
-  };
-
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        className={`cursor-pointer rounded px-1.5 py-0.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${className}`}
-        onClick={() => { onEditStart?.(); setEditing(true); }}
-        title="Click to edit"
-      >
-        {value ? <HighlightText text={value} query={highlight} matchOffset={matchOffset} activeMatchIndex={activeMatchIndex} /> : <span className="italic text-zinc-400">empty</span>}
-      </button>
-    );
-  }
-
-  if (multiline) {
-    return (
-      <textarea
-        ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={handleKey}
-        rows={4}
-        className={`w-full rounded-xl border-2 border-orange-400 bg-orange-50/50 px-4 py-3 text-sm shadow-md shadow-orange-200/50 focus:outline-none focus:ring-2 focus:ring-orange-400 dark:border-orange-500/60 dark:bg-orange-500/5 dark:shadow-orange-500/10 ${className}`}
-      />
-    );
-  }
-
-  return (
-    <input
-      ref={inputRef as React.RefObject<HTMLInputElement>}
-      type="text"
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={handleKey}
-      className={`rounded-lg border-2 border-orange-400 bg-orange-50/50 px-3 py-1.5 text-sm shadow-md shadow-orange-200/50 focus:outline-none focus:ring-2 focus:ring-orange-400 dark:border-orange-500/60 dark:bg-orange-500/5 dark:shadow-orange-500/10 ${className}`}
-    />
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Tag‑editor component                                               */
-/* ------------------------------------------------------------------ */
-
-function TagEditor({
-  tags,
-  onAdd,
-  onRemove,
-  highlight = "",
-  matchOffset = 0,
-  activeMatchIndex = -1,
-}: {
-  tags: string[];
-  onAdd: (tag: string) => void;
-  onRemove: (tag: string) => void;
-  highlight?: string;
-  matchOffset?: number;
-  activeMatchIndex?: number;
-}) {
-  const [input, setInput] = useState("");
-
-  const handleKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && input.trim()) {
-      e.preventDefault();
-      const tag = input.trim().toLowerCase();
-      if (!tags.includes(tag)) onAdd(tag);
-      setInput("");
-    }
-  };
-
-  // Compute per-tag offsets
-  const tagOffsets: number[] = [];
-  let runningOffset = matchOffset;
-  for (const tag of tags) {
-    tagOffsets.push(runningOffset);
-    if (highlight) {
-      const escaped = highlight.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const matches = tag.match(new RegExp(escaped, "gi"));
-      runningOffset += matches ? matches.length : 0;
-    }
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      {tags.map((tag, i) => (
-        <span
-          key={tag}
-          className="group/tag inline-flex cursor-pointer items-center gap-1 rounded-full bg-gradient-to-r from-orange-100 to-amber-100 px-3 py-1 text-xs font-semibold text-orange-700 shadow-sm transition-all hover:shadow dark:from-orange-500/15 dark:to-amber-500/15 dark:text-orange-300"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 opacity-50">
-            <path fillRule="evenodd" d="M4.5 2A2.5 2.5 0 0 0 2 4.5v2.879a2.5 2.5 0 0 0 .732 1.767l4.5 4.5a2.5 2.5 0 0 0 3.536 0l2.878-2.878a2.5 2.5 0 0 0 0-3.536l-4.5-4.5A2.5 2.5 0 0 0 7.38 2H4.5ZM5 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
-          </svg>
-          <HighlightText text={tag} query={highlight} matchOffset={tagOffsets[i]} activeMatchIndex={activeMatchIndex} />
-          <button
-            type="button"
-            onClick={() => onRemove(tag)}
-            className="ml-0.5 flex h-4 w-4 cursor-pointer items-center justify-center rounded-full text-orange-400 opacity-0 transition-all hover:bg-orange-200 hover:text-orange-700 group-hover/tag:opacity-100 dark:hover:bg-orange-500/30 dark:hover:text-orange-200"
-            aria-label={`Remove tag ${tag}`}
-          >
-            ×
-          </button>
-        </span>
-      ))}
-      <input
-        type="text"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={handleKey}
-        placeholder="+ Add tag…"
-        className="w-28 cursor-pointer rounded-full border border-dashed border-zinc-300 bg-transparent px-3 py-1 text-xs font-medium placeholder:text-zinc-400 transition hover:border-orange-300 hover:bg-orange-50 focus:cursor-text focus:border-orange-400 focus:bg-transparent focus:outline-none focus:ring-2 focus:ring-orange-200 dark:border-zinc-600 dark:hover:border-orange-500/30 dark:hover:bg-orange-500/5 dark:focus:ring-orange-500/20"
-      />
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Play button icon                                                   */
-/* ------------------------------------------------------------------ */
-
-function PlayIcon({ playing }: { playing: boolean }) {
-  if (playing) {
-    return (
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
-        <path fillRule="evenodd" d="M6.75 5.25a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-1.5 0V6a.75.75 0 0 1 .75-.75Zm10.5 0a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-1.5 0V6a.75.75 0 0 1 .75-.75Z" clipRule="evenodd" />
-      </svg>
-    );
-  }
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
-      <path fillRule="evenodd" d="M4.5 5.653c0-1.427 1.529-2.33 2.779-1.643l11.54 6.347c1.295.712 1.295 2.573 0 3.286L7.28 19.99c-1.25.687-2.779-.217-2.779-1.643V5.653Z" clipRule="evenodd" />
-    </svg>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Searchable select component                                        */
-/* ------------------------------------------------------------------ */
-
-function SearchSelect({
-  value,
-  onChange,
-  options,
-  placeholder,
-  icon,
-  className: wrapperClassName = "",
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-  placeholder: string;
-  icon: React.ReactNode;
-  className?: string;
-}) {
-  const [open, setOpen] = useState(false);
+function TodoList({ transcriptId, onActivityChange }: { transcriptId: string; onActivityChange?: () => void }) {
+  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newTitle, setNewTitle] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
   const [search, setSearch] = useState("");
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [showCompleted, setShowCompleted] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const editRef = useRef<HTMLInputElement>(null);
 
-  const filtered = options.filter((o) =>
-    o.toLowerCase().includes(search.toLowerCase())
-  );
+  const fetchTodos = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/transcripts/${transcriptId}/todos`);
+      if (!res.ok) return;
+      setTodos(await res.json());
+    } catch { /* ignore */ } finally {
+      setLoading(false);
+    }
+  }, [transcriptId]);
 
-  // close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-        setSearch("");
+  useEffect(() => { fetchTodos(); }, [fetchTodos]);
+  useEffect(() => { if (editingId && editRef.current) editRef.current.focus(); }, [editingId]);
+
+  const addTodo = async () => {
+    if (!newTitle.trim()) return;
+    setAdding(true);
+    try {
+      const res = await fetch(`/api/transcripts/${transcriptId}/todos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: newTitle.trim() }),
+      });
+      if (res.ok) {
+        setTodos(await res.json());
+        setNewTitle("");
+        inputRef.current?.focus();
+        onActivityChange?.();
       }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const select = (v: string) => {
-    onChange(v);
-    setOpen(false);
-    setSearch("");
+    } catch { /* ignore */ } finally { setAdding(false); }
   };
 
-  const displayLabel = value || placeholder;
+  const toggleTodo = async (todo: TodoItem) => {
+    const next = todo.is_completed === 1 ? 0 : 1;
+    setTodos((prev) => prev.map((t) => t.id === todo.id ? { ...t, is_completed: next } : t));
+    try {
+      const res = await fetch(`/api/transcripts/${transcriptId}/todos/${todo.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_completed: next }),
+      });
+      if (res.ok) {
+        setTodos(await res.json());
+        onActivityChange?.();
+      }
+    } catch { fetchTodos(); }
+  };
+
+  const saveEdit = async (todoId: number) => {
+    if (!editingTitle.trim()) { setEditingId(null); return; }
+    try {
+      const res = await fetch(`/api/transcripts/${transcriptId}/todos/${todoId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: editingTitle.trim() }),
+      });
+      if (res.ok) setTodos(await res.json());
+    } catch { /* ignore */ } finally { setEditingId(null); }
+  };
+
+  const deleteTodo = async (todoId: number) => {
+    setTodos((prev) => prev.filter((t) => t.id !== todoId));
+    try {
+      const res = await fetch(`/api/transcripts/${transcriptId}/todos/${todoId}`, { method: "DELETE" });
+      if (res.ok) {
+        setTodos(await res.json());
+        onActivityChange?.();
+      }
+    } catch { fetchTodos(); }
+  };
+
+  const openCount = todos.filter((t) => t.is_completed === 0).length;
+  const doneCount = todos.filter((t) => t.is_completed === 1).length;
+  const progress = todos.length > 0 ? Math.round((doneCount / todos.length) * 100) : 0;
 
   return (
-    <div ref={containerRef} className={`relative ${wrapperClassName}`}>
-      <button
-        type="button"
-        onClick={() => {
-          setOpen((prev) => !prev);
-          setTimeout(() => inputRef.current?.focus(), 0);
-        }}
-        className={`cursor-pointer inline-flex w-full items-center justify-center gap-2 rounded-xl border bg-zinc-50 py-2 pl-3 pr-3 text-sm font-medium shadow-sm transition-all hover:border-orange-300 hover:bg-orange-50 hover:shadow focus:outline-none dark:bg-zinc-800 dark:hover:border-orange-500/40 dark:hover:bg-orange-500/10 ${
-          open
-            ? "border-orange-400 ring-2 ring-orange-200 dark:border-orange-500/50 dark:ring-orange-500/20"
-            : "border-zinc-200 dark:border-zinc-700"
-        }`}
-      >
-        <span className="flex-shrink-0 text-zinc-400">{icon}</span>
-        <span className={`truncate ${value ? "text-zinc-800 dark:text-zinc-200" : "text-zinc-400 dark:text-zinc-500"}`}>
-          {displayLabel}
-        </span>
-        {value && (
-          <span
-            onClick={(e) => { e.stopPropagation(); select(""); }}
-            className="ml-0.5 flex h-4 w-4 cursor-pointer items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
-            aria-label="Clear filter"
-          >
-            ×
-          </span>
-        )}
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className={`h-3.5 w-3.5 text-zinc-400 transition-transform ${open ? "rotate-180" : ""}`}>
-          <path fillRule="evenodd" d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-        </svg>
-      </button>
-
-      {open && (
-        <div className="absolute right-0 top-full z-30 mt-1.5 w-56 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-800">
-          {/* search input */}
-          <div className="border-b border-zinc-100 p-2 dark:border-zinc-700">
+    <div className="rounded-xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      {/* Header */}
+      <div className="border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
+        <div className="flex items-center justify-between">
+          <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-zinc-50">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 text-indigo-500">
+              <path fillRule="evenodd" d="M11.986 3H12a2 2 0 0 1 2 2v6a2 2 0 0 1-1.5 1.937V7A2.5 2.5 0 0 0 10 4.5H4.063A2 2 0 0 1 6 3h.014A2.25 2.25 0 0 1 8.25 1h-.5a2.25 2.25 0 0 1 2.236 2ZM10.5 4v-.75a.75.75 0 0 0-.75-.75h-3.5a.75.75 0 0 0-.75.75V4h5Z" clipRule="evenodd" />
+              <path fillRule="evenodd" d="M2 7a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7Zm6.585 1.08a.75.75 0 0 1 .336 1.005l-1.75 3.5a.75.75 0 0 1-1.16.234l-1.25-1.25a.75.75 0 0 1 1.06-1.06l.557.556 1.202-2.649a.75.75 0 0 1 1.005-.337Z" clipRule="evenodd" />
+            </svg>
+            To-Do
+          </h2>
+          <div className="flex items-center gap-2">
+            {todos.length > 0 && (
+              <>
+                <span className="text-[10px] font-semibold tabular-nums text-zinc-400">
+                  {doneCount}/{todos.length}
+                </span>
+                <div className="h-1.5 w-16 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-500"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </>
+            )}
+            {doneCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowCompleted((v) => !v)}
+                className="cursor-pointer inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
+              >
+                {showCompleted ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3"><path d="M2.28 2.22a.75.75 0 0 0-1.06 1.06l5.72 5.72-1.72 1.72a.75.75 0 0 0 1.06 1.06l1.72-1.72 4.72 4.72a.75.75 0 1 0 1.06-1.06l-11.5-11.5Z" /><path d="M6.233 4.112a6.538 6.538 0 0 1 1.77-.248c2.296 0 4.076 1.16 5.213 2.398a10.46 10.46 0 0 1 1.206 1.59c.058.096.1.17.128.223l.022.04-.022.04a8.15 8.15 0 0 1-.506.745l1.06 1.06A9.413 9.413 0 0 0 15.9 8.6l.1-.2a.75.75 0 0 0 0-.8C15.382 6.378 13.12 3.364 8.003 3.364c-.9 0-1.73.134-2.49.38l.72.368ZM9.742 11.872l-1.06-1.06A6.518 6.518 0 0 1 8 10.864c-2.297 0-4.076-1.16-5.213-2.398a10.502 10.502 0 0 1-1.206-1.59 4.426 4.426 0 0 1-.128-.223l.022-.04a8.14 8.14 0 0 1 .506-.745L.92 4.808A9.406 9.406 0 0 0 .1 6.4l-.1.2a.75.75 0 0 0 0 .8C.618 8.622 2.88 11.636 5.997 11.636c.9 0 1.73-.134 2.49-.38l1.255.616Z" /></svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3"><path d="M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" /><path fillRule="evenodd" d="M1.38 8.28a.87.87 0 0 1 0-.566 7.003 7.003 0 0 1 13.238.006.87.87 0 0 1 0 .566A7.003 7.003 0 0 1 1.379 8.28ZM11 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" clipRule="evenodd" /></svg>
+                )}
+                {showCompleted ? "Hide done" : "Show done"}
+              </button>
+            )}
             <div className="relative">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400">
-                <path fillRule="evenodd" d="M9.965 11.026a5 5 0 1 1 1.06-1.06l2.755 2.754a.75.75 0 1 1-1.06 1.06l-2.755-2.754ZM10.5 7a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z" clipRule="evenodd" />
-              </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-indigo-400 dark:text-indigo-500"><path fillRule="evenodd" d="M9.965 11.026a5 5 0 1 1 1.06-1.06l2.755 2.754a.75.75 0 1 1-1.06 1.06l-2.755-2.754ZM10.5 7a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z" clipRule="evenodd" /></svg>
               <input
-                ref={inputRef}
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search…"
-                className="w-full rounded-lg bg-zinc-50 py-1.5 pl-8 pr-3 text-sm placeholder:text-zinc-400 focus:outline-none dark:bg-zinc-900 dark:placeholder:text-zinc-500"
+                placeholder="Search tasks…"
+                className="w-32 rounded-full border border-indigo-200/60 bg-indigo-50/50 py-1 pl-7 pr-2.5 text-[11px] text-indigo-700 placeholder:text-indigo-300 transition focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-indigo-500/20 dark:bg-indigo-500/5 dark:text-indigo-300 dark:placeholder:text-indigo-500/50 dark:focus:border-indigo-500/40 dark:focus:bg-zinc-900 dark:focus:ring-indigo-500/10"
               />
             </div>
           </div>
+        </div>
+      </div>
 
-          {/* options list */}
-          <div className="max-h-48 overflow-y-auto py-1">
-            <button
-              type="button"
-              onClick={() => select("")}
-              className={`w-full cursor-pointer px-3 py-2 text-left text-sm transition-colors hover:bg-orange-50 dark:hover:bg-orange-500/10 ${
-                !value ? "font-semibold text-orange-600 dark:text-orange-400" : "text-zinc-500 dark:text-zinc-400"
-              }`}
-            >
-              {placeholder}
-            </button>
-            {filtered.length === 0 && (
-              <p className="px-3 py-3 text-center text-xs text-zinc-400">No matches found</p>
+      {/* Add input — top */}
+      <div className="border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="pointer-events-none absolute left-2.5 top-[9px] h-3.5 w-3.5 text-indigo-400 z-10">
+              <path d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z" />
+            </svg>
+            <MentionTextarea
+              value={newTitle}
+              onChange={setNewTitle}
+              onSubmit={addTodo}
+              placeholder="add a to do"
+              className="!bg-indigo-50/40 dark:!bg-indigo-500/5"
+              inputClassName="!pl-8"
+              rows={1}
+              minHeight="34px"
+              maxHeight="80px"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={addTodo}
+            disabled={!newTitle.trim() || adding}
+            className="cursor-pointer flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-sm shadow-indigo-500/20 transition hover:shadow-indigo-500/40 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="Add task"
+          >
+            {adding ? (
+              <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+                <path d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z" />
+              </svg>
             )}
-            {filtered.map((opt) => (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => select(opt)}
-                className={`w-full cursor-pointer px-3 py-2 text-left text-sm transition-colors hover:bg-orange-50 dark:hover:bg-orange-500/10 ${
-                  value === opt
-                    ? "bg-orange-50 font-semibold text-orange-600 dark:bg-orange-500/10 dark:text-orange-400"
-                    : "text-zinc-700 dark:text-zinc-300"
-                }`}
-              >
-                {opt}
-              </button>
+          </button>
+        </div>
+      </div>
+
+      {/* List */}
+      <div className="max-h-64 overflow-y-auto divide-y divide-zinc-50 dark:divide-zinc-800/50">
+        {loading && (
+          <div className="space-y-0 divide-y divide-zinc-50 dark:divide-zinc-800/50">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-3 px-5 py-3 animate-pulse">
+                <div className="h-5 w-5 flex-shrink-0 rounded-md bg-zinc-200 dark:bg-zinc-700" />
+                <div className="flex-1 space-y-1.5">
+                  <div className={`h-3.5 rounded bg-zinc-200 dark:bg-zinc-700 ${i === 2 ? 'w-3/5' : i === 3 ? 'w-2/5' : 'w-4/5'}`} />
+                </div>
+              </div>
             ))}
           </div>
+        )}
+
+        {!loading && todos.length === 0 && !newTitle && (
+          <div className="flex flex-col items-center justify-center py-8 px-5">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-50 dark:bg-indigo-500/10 mb-2">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-5 w-5 text-indigo-400">
+                <path fillRule="evenodd" d="M11.986 3H12a2 2 0 0 1 2 2v6a2 2 0 0 1-1.5 1.937V7A2.5 2.5 0 0 0 10 4.5H4.063A2 2 0 0 1 6 3h.014A2.25 2.25 0 0 1 8.25 1h-.5a2.25 2.25 0 0 1 2.236 2ZM10.5 4v-.75a.75.75 0 0 0-.75-.75h-3.5a.75.75 0 0 0-.75.75V4h5Z" clipRule="evenodd" />
+                <path fillRule="evenodd" d="M2 7a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7Zm6.585 1.08a.75.75 0 0 1 .336 1.005l-1.75 3.5a.75.75 0 0 1-1.16.234l-1.25-1.25a.75.75 0 0 1 1.06-1.06l.557.556 1.202-2.649a.75.75 0 0 1 1.005-.337Z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">No tasks yet</p>
+            <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Type above to add your first task</p>
+          </div>
+        )}
+
+        {todos.filter((t) => {
+          if (!showCompleted && t.is_completed === 1) return false;
+          if (search && !t.title.toLowerCase().includes(search.toLowerCase())) return false;
+          return true;
+        }).map((todo) => (
+          <div
+            key={todo.id}
+            className={`group flex items-start gap-3 px-5 py-2.5 transition-colors hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30 ${
+              todo.is_completed ? "bg-zinc-50/50 dark:bg-zinc-800/20" : ""
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => toggleTodo(todo)}
+              className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border-2 transition-all cursor-pointer ${
+                todo.is_completed
+                  ? "border-indigo-500 bg-indigo-500 text-white dark:border-indigo-400 dark:bg-indigo-500"
+                  : "border-zinc-300 bg-white hover:border-indigo-400 dark:border-zinc-600 dark:bg-zinc-900 dark:hover:border-indigo-500"
+              }`}
+              aria-label={todo.is_completed ? "Mark incomplete" : "Mark complete"}
+            >
+              {todo.is_completed === 1 && (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
+                  <path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
+                </svg>
+              )}
+            </button>
+
+            <div className="min-w-0 flex-1">
+              {editingId === todo.id ? (
+                <input
+                  ref={editRef}
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onBlur={() => saveEdit(todo.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveEdit(todo.id);
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
+                  className="w-full rounded-lg border border-indigo-300 bg-white px-2 py-0.5 text-sm text-zinc-900 outline-none ring-2 ring-indigo-200 dark:border-indigo-500/50 dark:bg-zinc-900 dark:text-zinc-100 dark:ring-indigo-500/20"
+                />
+              ) : (
+                <p
+                  onClick={() => { setEditingId(todo.id); setEditingTitle(todo.title); }}
+                  className={`cursor-pointer text-sm leading-snug transition ${
+                    todo.is_completed
+                      ? "text-zinc-400 line-through decoration-zinc-300 dark:text-zinc-500 dark:decoration-zinc-600"
+                      : "text-zinc-700 dark:text-zinc-300"
+                  }`}
+                >
+                  <MentionText text={todo.title} highlight={search} />
+                </p>
+              )}
+              {todo.completed_at && (
+                <p className="mt-0.5 text-[10px] text-zinc-400">Completed {relativeTime(todo.completed_at)}</p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => deleteTodo(todo.id)}
+              className="cursor-pointer mt-0.5 flex-shrink-0 rounded-lg p-1 text-zinc-300 opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-500 dark:text-zinc-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+              aria-label="Delete todo"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+                <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+              </svg>
+            </button>
+          </div>
+        ))}
+
+      </div>
+
+      {/* Footer */}
+      {openCount > 0 && doneCount > 0 && (
+        <div className="border-t border-zinc-100 px-5 py-2 dark:border-zinc-800">
+          <p className="text-[10px] text-zinc-400">{openCount} remaining · {doneCount} completed</p>
         </div>
       )}
     </div>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Word‑level diff helper                                             */
-/* ------------------------------------------------------------------ */
+/* ================================================================== */
+/*  Thread List component                                              */
+/* ================================================================== */
 
-type DiffSegment = { text: string; type: "equal" | "added" | "removed" };
+const AVATAR_COLORS = [
+  "from-orange-400 to-amber-400",
+  "from-sky-400 to-indigo-400",
+  "from-emerald-400 to-teal-400",
+  "from-violet-400 to-purple-400",
+  "from-pink-400 to-rose-400",
+  "from-cyan-400 to-blue-400",
+];
 
-/** Simple word‑level diff using longest‑common‑subsequence. */
-function computeWordDiff(original: string, edited: string): DiffSegment[] {
-  const a = original.split(/\s+/).filter(Boolean);
-  const b = edited.split(/\s+/).filter(Boolean);
-
-  // Build LCS table
-  const m = a.length;
-  const n = b.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-  for (let i = 1; i <= m; i++)
-    for (let j = 1; j <= n; j++)
-      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
-
-  // Back‑track to produce segments
-  const segments: DiffSegment[] = [];
-  let i = m, j = n;
-  const stack: DiffSegment[] = [];
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
-      stack.push({ text: a[i - 1], type: "equal" });
-      i--; j--;
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      stack.push({ text: b[j - 1], type: "added" });
-      j--;
-    } else {
-      stack.push({ text: a[i - 1], type: "removed" });
-      i--;
-    }
-  }
-  stack.reverse();
-
-  // Merge consecutive segments of the same type
-  for (const seg of stack) {
-    const last = segments[segments.length - 1];
-    if (last && last.type === seg.type) {
-      last.text += " " + seg.text;
-    } else {
-      segments.push({ ...seg });
-    }
-  }
-  return segments;
+function avatarColor(id: number | null) {
+  return AVATAR_COLORS[(id ?? 0) % AVATAR_COLORS.length];
 }
 
-/* ------------------------------------------------------------------ */
-/*  Diff modal                                                         */
-/* ------------------------------------------------------------------ */
-
-function DiffModal({
-  section,
-  onClose,
-  onSave,
-}: {
-  section: TranscriptSection;
-  onClose: () => void;
-  onSave: (value: string) => void;
-}) {
-  const original = section.original_text ?? "";
-  const [draft, setDraft] = useState(section.edited_text ?? original);
-  const [saving, setSaving] = useState(false);
-  const hasChanges = original !== draft;
-  const segments = hasChanges ? computeWordDiff(original, draft) : [];
-  const isDirty = draft !== (section.edited_text ?? original);
-
-  const handleSave = async () => {
-    setSaving(true);
-    onSave(draft);
-    setSaving(false);
-  };
-
-  // Close on Escape
-  useEffect(() => {
-    const handler = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div className="relative mx-4 max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
-        {/* header */}
-        <div className="flex items-center justify-between border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-orange-400 to-amber-500 text-white">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
-                <path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.262a1.75 1.75 0 0 0 0-2.474Z" />
-                <path d="M4.75 3.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h6.5c.69 0 1.25-.56 1.25-1.25V9A.75.75 0 0 1 14 9v2.25A2.75 2.75 0 0 1 11.25 14h-6.5A2.75 2.75 0 0 1 2 11.25v-6.5A2.75 2.75 0 0 1 4.75 2H7a.75.75 0 0 1 0 1.5H4.75Z" />
-              </svg>
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">View Differences</h3>
-              <p className="text-xs text-zinc-400">{section.speaker ?? "Unknown"}</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="cursor-pointer rounded-lg p-1.5 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-            aria-label="Close"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
-              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-            </svg>
-          </button>
-        </div>
-
-        {/* body */}
-        <div className="overflow-y-auto px-6 py-5" style={{ maxHeight: "calc(85vh - 130px)" }}>
-          {!hasChanges ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-500/15">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-6 w-6 text-emerald-600 dark:text-emerald-400">
-                  <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <p className="text-sm font-medium text-zinc-600 dark:text-zinc-300">No changes detected</p>
-              <p className="text-xs text-zinc-400">The edited text matches the original.</p>
-            </div>
-          ) : (
-            <div className="space-y-5">
-              {/* Diff output */}
-              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-5 py-4 text-sm leading-relaxed dark:border-zinc-700 dark:bg-zinc-800/60">
-                {segments.map((seg, idx) => {
-                  if (seg.type === "removed") {
-                    return (
-                      <span key={idx} className="rounded-sm bg-red-100 px-0.5 text-red-700 line-through decoration-red-300 dark:bg-red-500/20 dark:text-red-300 dark:decoration-red-500/50">
-                        {seg.text}{" "}
-                      </span>
-                    );
-                  }
-                  if (seg.type === "added") {
-                    return (
-                      <span key={idx} className="rounded-sm bg-emerald-100 px-0.5 font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
-                        {seg.text}{" "}
-                      </span>
-                    );
-                  }
-                  return <span key={idx}>{seg.text} </span>;
-                })}
-              </div>
-
-              {/* Side‑by‑side panels */}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="flex flex-col gap-1.5">
-                  <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600" />
-                    Original
-                  </p>
-                  <p className="flex-1 rounded-xl bg-zinc-100 px-4 py-3 text-sm leading-relaxed text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
-                    {original || <span className="italic text-zinc-300">empty</span>}
-                  </p>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-400" />
-                    Modified
-                  </p>
-                  <textarea
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    rows={4}
-                    className="flex-1 resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm leading-relaxed text-zinc-600 transition focus:border-orange-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-orange-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:focus:border-orange-500/50 dark:focus:bg-zinc-900 dark:focus:ring-orange-500/20"
-                    placeholder="Edit the text…"
-                  />
-                </div>
-              </div>
-
-              {/* Save button */}
-              {isDirty && (
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="cursor-pointer inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-orange-500/20 transition hover:shadow-lg hover:shadow-orange-500/30 hover:brightness-110 active:scale-[0.98] disabled:opacity-50"
-                  >
-                    {saving ? (
-                      <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
-                        <path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
-                      </svg>
-                    )}
-                    Save changes
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Comment popover                                                    */
-/* ------------------------------------------------------------------ */
-
-function CommentPopover({
-  transcriptId,
-  sectionId,
-  comments,
-  loadingComments,
-  onCommentAdded,
-  onClose,
-}: {
-  transcriptId: string;
-  sectionId: number;
-  comments: TranscriptComment[];
-  loadingComments: boolean;
-  onCommentAdded: (silent?: boolean) => void;
-  onClose: () => void;
-}) {
-  const sectionComments = comments.filter((c) => c.section_id === sectionId);
-  const [newComment, setNewComment] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [optimisticComments, setOptimisticComments] = useState<TranscriptComment[]>([]);
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = useCallback(() => {
-    setTimeout(() => {
-      if (listRef.current) {
-        listRef.current.scrollTop = listRef.current.scrollHeight;
-      }
-    }, 50);
-  }, []);
-
-  // Scroll to bottom on mount and when comments change
-  useEffect(() => {
-    scrollToBottom();
-  }, [sectionComments.length, optimisticComments.length, scrollToBottom]);
-
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
-
-  // Close on Escape
-  useEffect(() => {
-    const handler = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  const handleSubmit = async () => {
-    if (!newComment.trim()) return;
-    const text = newComment.trim();
-    setSubmitting(true);
-    // Optimistically add the comment to the list immediately
-    const tempComment: TranscriptComment = {
-      id: Date.now(),
-      transcription_id: Number(transcriptId),
-      section_id: sectionId,
-      comment: text,
-      created_by: null,
-      created_at: new Date().toISOString(),
-      is_active: 1,
-    };
-    setOptimisticComments((prev) => [...prev, tempComment]);
-    setNewComment("");
-    try {
-      const res = await fetch(`/api/transcriptions/${transcriptId}/comments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ section_id: sectionId, comment: text }),
-      });
-      if (!res.ok) throw new Error("Failed to create comment");
-      // Silently refetch to sync with server, then clear optimistic state
-      await onCommentAdded(true);
-      setOptimisticComments([]);
-    } catch {
-      // Remove optimistic comment on failure
-      setOptimisticComments((prev) => prev.filter((c) => c.id !== tempComment.id));
-      setNewComment(text);
-      alert("Failed to post comment – please try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return "";
-    try {
-      const d = new Date(dateStr);
-      return d.toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } catch {
-      return dateStr;
-    }
-  };
-
-  return (
-    <div ref={popoverRef} className="absolute right-0 top-full z-40 mt-2 w-96 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
-        <div className="flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-sky-500">
-            <path fillRule="evenodd" d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317 .713 2.435 0 3.277 0 4.26v4.48ZM5 6.5a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 6.5Zm.75 1.75a.75.75 0 0 0 0 1.5h2.5a.75.75 0 0 0 0-1.5h-2.5Z" clipRule="evenodd" />
-          </svg>
-          <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-            {(sectionComments.length + optimisticComments.length)} comment{(sectionComments.length + optimisticComments.length) !== 1 ? "s" : ""}
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="cursor-pointer rounded-lg p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-          aria-label="Close"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Comment list */}
-      <div ref={listRef} className="max-h-[280px] overflow-y-auto">
-        {loadingComments ? (
-          <div className="flex items-center justify-center gap-2 py-6">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
-            <span className="text-xs text-zinc-400">Loading…</span>
-          </div>
-        ) : sectionComments.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-1 py-6">
-            <p className="text-xs font-medium text-zinc-400">No comments yet</p>
-            <p className="text-[10px] text-zinc-300 dark:text-zinc-600">Be the first to comment.</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {[...sectionComments, ...optimisticComments].map((c) => (
-              <div key={c.id} className="px-4 py-3">
-                <div className="flex items-start gap-2.5">
-                  <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-100 to-indigo-100 text-[10px] font-bold text-sky-700 ring-1 ring-sky-200/60 dark:from-sky-500/20 dark:to-indigo-500/20 dark:text-sky-300 dark:ring-sky-500/30">
-                    U{c.created_by ?? "?"}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-                        User {c.created_by ?? "Unknown"}
-                      </span>
-                      <span className="text-[10px] text-zinc-400">{formatDate(c.created_at)}</span>
-                    </div>
-                    <p className="mt-0.5 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-                      {c.comment ?? ""}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* New comment form */}
-      <div className="border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
-        <div className="flex items-start gap-2">
-          <textarea
-            value={newComment}
-            onChange={(e) => setNewComment(e.target.value)}
-            placeholder="Write a comment…"
-            rows={2}
-            className="flex-1 resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm placeholder:text-zinc-400 transition focus:border-sky-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-200 dark:border-zinc-700 dark:bg-zinc-800 dark:placeholder:text-zinc-500 dark:focus:border-sky-500/50 dark:focus:bg-zinc-900 dark:focus:ring-sky-500/20"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.altKey) {
-                e.preventDefault();
-                handleSubmit();
-              }
-            }}
-          />
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={!newComment.trim() || submitting}
-            className="cursor-pointer mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-sky-500 to-indigo-500 text-white shadow-sm shadow-sky-500/20 transition hover:shadow-sky-500/40 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Post comment"
-          >
-            {submitting ? (
-              <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
-                <path d="M2.87 2.298a.75.75 0 0 0-.812 1.021L3.39 6.624a1 1 0 0 0 .928.626H8.25a.75.75 0 0 1 0 1.5H4.318a1 1 0 0 0-.927.626l-1.333 3.305a.75.75 0 0 0 .812 1.021l11.07-3.548a.75.75 0 0 0 0-1.408L2.87 2.298Z" />
-              </svg>
-            )}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Inline comment input (always visible)                              */
-/* ------------------------------------------------------------------ */
-
-function InlineCommentInput({
-  transcriptId,
-  sectionId,
-  onCommentAdded,
-}: {
-  transcriptId: string;
-  sectionId: number;
-  onCommentAdded: () => void;
-}) {
-  const [value, setValue] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  const handleSubmit = async () => {
-    if (!value.trim()) return;
-    setSubmitting(true);
-    try {
-      const res = await fetch(`/api/transcriptions/${transcriptId}/comments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ section_id: sectionId, comment: value.trim() }),
-      });
-      if (!res.ok) throw new Error("Failed to create comment");
-      setValue("");
-      onCommentAdded();
-    } catch {
-      alert("Failed to post comment – please try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const autoResize = () => {
-    const el = textareaRef.current;
-    if (el) {
-      el.style.height = "auto";
-      el.style.height = `${Math.min(el.scrollHeight, 80)}px`;
-    }
-  };
-
-  return (
-    <div className="flex items-end gap-2">
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={(e) => { setValue(e.target.value); autoResize(); }}
-        placeholder="Add a comment…"
-        rows={1}
-        className="flex-1 resize-none overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs placeholder:text-zinc-400 transition focus:border-sky-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-200 dark:border-zinc-700 dark:bg-zinc-800 dark:placeholder:text-zinc-500 dark:focus:border-sky-500/50 dark:focus:bg-zinc-900 dark:focus:ring-sky-500/20"
-        style={{ minHeight: "28px", maxHeight: "80px" }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            handleSubmit();
-          }
-        }}
-      />
-      <button
-        type="button"
-        onClick={handleSubmit}
-        disabled={!value.trim() || submitting}
-        className="cursor-pointer flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-sky-500 to-indigo-500 text-white shadow-sm shadow-sky-500/20 transition hover:shadow-sky-500/40 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
-        aria-label="Post comment"
-      >
-        {submitting ? (
-          <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-        ) : (
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
-            <path d="M2.87 2.298a.75.75 0 0 0-.812 1.021L3.39 6.624a1 1 0 0 0 .928.626H8.25a.75.75 0 0 1 0 1.5H4.318a1 1 0 0 0-.927.626l-1.333 3.305a.75.75 0 0 0 .812 1.021l11.07-3.548a.75.75 0 0 0 0-1.408L2.87 2.298Z" />
-          </svg>
-        )}
-      </button>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Main page component                                                */
-/* ------------------------------------------------------------------ */
-
-export default function TranscriptEditorPage() {
-  const params = useParams<{ transcriptId: string }>();
-  const transcriptId = params.transcriptId;
-
-  const [sections, setSections] = useState<TranscriptSection[]>([]);
+function ThreadList({ transcriptId, onActivityChange }: { transcriptId: string; onActivityChange?: () => void }) {
+  const [threads, setThreads] = useState<ThreadItem[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [savingId, setSavingId] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+  const [searchHits, setSearchHits] = useState<PostSearchHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [adding, setAdding] = useState(false);
 
-  // Global audio player state (backed by real <audio> element)
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [hasAudio, setHasAudio] = useState(false);
-  const [audioDuration, setAudioDuration] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [playerTime, setPlayerTime] = useState(0);
-  const [volume, setVolume] = useState(80);
-  const [isMuted, setIsMuted] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
-  const speedMenuRef = useRef<HTMLDivElement>(null);
+  /* ── Expanded thread state ── */
+  const [openThreadId, setOpenThreadId] = useState<number | null>(null);
+  const [posts, setPosts] = useState<PostItem[]>([]);
+  const [postsLoading, setPostsLoading] = useState(false);
+  const [replyBody, setReplyBody] = useState("");
+  const [replying, setReplying] = useState(false);
+  const postsEndRef = useRef<HTMLDivElement>(null);
 
-  const [filterSpeaker, setFilterSpeaker] = useState("");
-  const [filterTag, setFilterTag] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchMatchIndex, setSearchMatchIndex] = useState(0);
-  const [diffSectionId, setDiffSectionId] = useState<number | null>(null);
-  const [comments, setComments] = useState<TranscriptComment[]>([]);
-  const [loadingComments, setLoadingComments] = useState(true);
-  const [commentSectionId, setCommentSectionId] = useState<number | null>(null);
-  const [sidebarPanel, setSidebarPanel] = useState<{ sectionId: number; panel: "notes" | "tags" | "edits" } | null>(null);
-  const [exportOpen, setExportOpen] = useState(false);
-  const exportRef = useRef<HTMLDivElement>(null);
-  const notesListRef = useRef<HTMLDivElement>(null);
-  const previousNotesCountRef = useRef(0);
-
-  const activeSidebarSection = sidebarPanel ? sections.find((s) => s.id === sidebarPanel.sectionId) : null;
-  const activeNotesCount = sidebarPanel?.panel === "notes" && activeSidebarSection
-    ? comments.filter((c) => c.section_id === activeSidebarSection.section_id).length
-    : 0;
-
-  // Close export dropdown on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
-        setExportOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  /* ---------- Fetch comments ---------- */
-
-  const fetchComments = useCallback(async (silent = false) => {
-    if (!silent) setLoadingComments(true);
+  const fetchThreads = useCallback(async () => {
     try {
-      const res = await fetch(`/api/transcriptions/${transcriptId}/comments`);
-      if (!res.ok) throw new Error("Failed to load comments");
-      const data: TranscriptComment[] = await res.json();
-      setComments(data);
-    } catch {
-      /* silently ignore – comments are non-critical */
-    } finally {
-      if (!silent) setLoadingComments(false);
-    }
-  }, [transcriptId]);
-
-  useEffect(() => {
-    fetchComments();
-  }, [fetchComments]);
-
-  // Keep notes popout pinned to latest comment when opened or when a new comment arrives
-  useEffect(() => {
-    if (sidebarPanel?.panel !== "notes") {
-      previousNotesCountRef.current = 0;
-      return;
-    }
-
-    const shouldScroll =
-      previousNotesCountRef.current === 0 || activeNotesCount > previousNotesCountRef.current;
-
-    previousNotesCountRef.current = activeNotesCount;
-
-    if (!shouldScroll) return;
-
-    requestAnimationFrame(() => {
-      if (!notesListRef.current) return;
-      notesListRef.current.scrollTop = notesListRef.current.scrollHeight;
-    });
-  }, [sidebarPanel?.panel, sidebarPanel?.sectionId, activeNotesCount]);
-
-  /* ---------- Fetch transcript sections ---------- */
-
-  const fetchSections = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/transcriptions/${transcriptId}`);
-      if (!res.ok) throw new Error(`Failed to load transcript (${res.status})`);
-      const data: TranscriptSection[] = await res.json();
-      setSections(
-        [...data].sort((a, b) => (a.section_id ?? 0) - (b.section_id ?? 0))
-      );
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
+      const res = await fetch(`/api/transcripts/${transcriptId}/threads`);
+      if (!res.ok) return;
+      const data: ThreadItem[] = await res.json();
+      setThreads(data);
+      setTotalCount(data.length);
+    } catch { /* ignore */ } finally {
       setLoading(false);
     }
   }, [transcriptId]);
 
+  useEffect(() => { fetchThreads(); }, [fetchThreads]);
+
+  /* Debounced search – hits the backend to search post bodies */
   useEffect(() => {
-    fetchSections();
-  }, [fetchSections]);
+    if (!search.trim()) { setSearchHits([]); setSearching(false); return; }
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/transcripts/${transcriptId}/threads/search-posts?q=${encodeURIComponent(search)}`);
+        if (res.ok) setSearchHits(await res.json());
+      } catch { /* ignore */ } finally { setSearching(false); }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search, transcriptId]);
 
-  /* ---------- Persist a field change ---------- */
-
-  const saveField = async (
-    sectionDbId: number,
-    field: "speaker" | "edited_text",
-    value: string
-  ) => {
-    setSavingId(sectionDbId);
+  const addThread = async () => {
+    if (!newTitle.trim()) return;
+    setAdding(true);
     try {
-      const res = await fetch(`/api/transcriptions/sections/${sectionDbId}`, {
-        method: "PUT",
+      const res = await fetch(`/api/transcripts/${transcriptId}/threads`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [field]: value }),
+        body: JSON.stringify({ title: newTitle.trim() }),
       });
-      if (!res.ok) throw new Error("Save failed");
-      setSections((prev) =>
-        prev.map((s) => (s.id === sectionDbId ? { ...s, [field]: value } : s))
-      );
-    } catch {
-      alert("Failed to save – please try again.");
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  const saveTags = async (sectionDbId: number, tags: string[]) => {
-    setSavingId(sectionDbId);
-    try {
-      const res = await fetch(`/api/transcriptions/sections/${sectionDbId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tags }),
-      });
-      if (!res.ok) throw new Error("Save failed");
-      setSections((prev) =>
-        prev.map((s) => (s.id === sectionDbId ? { ...s, tags } : s))
-      );
-    } catch {
-      alert("Failed to save – please try again.");
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  /* ---------- Tag helpers ---------- */
-
-  const handleAddTag = (sectionDbId: number, currentTags: string[], newTag: string) => {
-    const updated = [...currentTags, newTag];
-    saveTags(sectionDbId, updated);
-  };
-
-  const handleRemoveTag = (sectionDbId: number, currentTags: string[], removeTag: string) => {
-    const updated = currentTags.filter((t) => t !== removeTag);
-    saveTags(sectionDbId, updated);
-  };
-
-  /* ---------- Global audio player ---------- */
-
-  // Probe for an audio file once sections are loaded
-  useEffect(() => {
-    if (!transcriptId) return;
-    fetch(`/api/transcripts/${transcriptId}/audio`, { method: "HEAD" }).then((r) => {
-      if (r.ok) {
-        setHasAudio(true);
+      if (res.ok) {
+        setNewTitle("");
+        fetchThreads();
+        onActivityChange?.();
       }
-    }).catch(() => { /* no audio available */ });
+    } catch { /* ignore */ } finally { setAdding(false); }
+  };
+
+  /* ── Posts for expanded thread ── */
+  const fetchPosts = useCallback(async (threadId: number) => {
+    setPostsLoading(true);
+    try {
+      const res = await fetch(`/api/transcripts/${transcriptId}/threads/${threadId}/posts`);
+      if (res.ok) setPosts(await res.json());
+    } catch { /* ignore */ } finally { setPostsLoading(false); }
   }, [transcriptId]);
 
-  // Sync volume / mute / speed to the <audio> element
-  useEffect(() => {
-    const a = audioRef.current;
-    if (!a) return;
-    a.volume = isMuted ? 0 : volume / 100;
-  }, [volume, isMuted]);
-
-  useEffect(() => {
-    const a = audioRef.current;
-    if (!a) return;
-    a.playbackRate = playbackSpeed;
-  }, [playbackSpeed]);
-
-  // Total duration: prefer real audio duration, fall back to section timestamps
-  const sectionDuration = sections.length > 0
-    ? Math.max(...sections.map((s) => timestampToSeconds(s.end_timestamp)))
-    : 0;
-  const totalDuration = audioDuration > 0 ? audioDuration : sectionDuration;
-
-  // Determine which section is active based on playerTime
-  const activeSectionId = (() => {
-    for (let i = sections.length - 1; i >= 0; i--) {
-      const s = sections[i];
-      if (playerTime >= timestampToSeconds(s.begin_timestamp) && playerTime < timestampToSeconds(s.end_timestamp)) {
-        return s.id;
-      }
-    }
-    return null;
-  })();
-
-  const activeSection = activeSectionId !== null ? sections.find((s) => s.id === activeSectionId) : null;
-
-  // Keep a ref to the last known active section so we don't flash during gaps
-  const lastActiveSectionRef = useRef<typeof activeSection>(null);
-  if (activeSection) {
-    lastActiveSectionRef.current = activeSection;
-  }
-  const displaySection = activeSection ?? lastActiveSectionRef.current;
-
-  // Close speed menu on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (speedMenuRef.current && !speedMenuRef.current.contains(e.target as Node)) {
-        setSpeedMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  /* --- playback helpers (audio-element driven) --- */
-
-  const startPlayback = useCallback(() => {
-    const a = audioRef.current;
-    if (a && hasAudio) {
-      a.play().catch(() => {});
-      // isPlaying will be set by the onPlay event handler
-    } else if (!hasAudio && sections.length > 0) {
-      // Fallback: section-only mode (no audio)
-      setIsPlaying(true);
-    }
-  }, [hasAudio, sections.length]);
-
-  const pausePlayback = useCallback(() => {
-    const a = audioRef.current;
-    if (a) a.pause();
-    setIsPlaying(false);
-  }, []);
-
-  const togglePlayback = useCallback(() => {
-    if (isPlaying) {
-      pausePlayback();
-    } else {
-      const a = audioRef.current;
-      if (a && playerTime >= totalDuration && totalDuration > 0) {
-        a.currentTime = 0;
-        setPlayerTime(0);
-      }
-      startPlayback();
-    }
-  }, [isPlaying, playerTime, totalDuration, startPlayback, pausePlayback]);
-
-  const seekTo = useCallback((time: number) => {
-    const clamped = Math.max(0, Math.min(time, totalDuration || Infinity));
-    setPlayerTime(clamped);
-    const a = audioRef.current;
-    if (a) a.currentTime = clamped;
-  }, [totalDuration]);
-
-  const handlePlay = (section: TranscriptSection) => {
-    if (activeSectionId === section.id && isPlaying) {
-      pausePlayback();
+  const openThread = (t: ThreadItem) => {
+    if (openThreadId === t.id) {
+      setOpenThreadId(null);
+      setPosts([]);
       return;
     }
-    if (activeSectionId === section.id && !isPlaying) {
-      startPlayback();
-      return;
-    }
-    const startSec = timestampToSeconds(section.begin_timestamp);
-    seekTo(startSec);
-    setTimeout(() => startPlayback(), 50);
+    setOpenThreadId(t.id);
+    setPosts([]);
+    setReplyBody("");
+    fetchPosts(t.id);
   };
 
-  const sectionListRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll to active section
   useEffect(() => {
-    if (activeSectionId !== null && isPlaying && sectionListRef.current) {
-      const el = sectionListRef.current.querySelector(`[data-section-id="${activeSectionId}"]`) as HTMLElement | null;
-      if (el) {
-        const container = sectionListRef.current;
-        const elTop = el.offsetTop - container.offsetTop;
-        container.scrollTo({ top: elTop - 8, behavior: "smooth" });
+    if (posts.length > 0) postsEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [posts.length]);
+
+  const sendReply = async () => {
+    if (!replyBody.trim() || !openThreadId) return;
+    setReplying(true);
+    try {
+      const res = await fetch(`/api/transcripts/${transcriptId}/threads/${openThreadId}/posts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: replyBody.trim() }),
+      });
+      if (res.ok) {
+        setPosts(await res.json());
+        setReplyBody("");
+        onActivityChange?.();
+        fetchThreads(); // refresh post counts
       }
-    }
-  }, [activeSectionId, isPlaying]);
+    } catch { /* ignore */ } finally { setReplying(false); }
+  };
 
-  // Global keyboard shortcuts: Space = play/pause, Left/Right arrows = ±5s
+  const openThread_ = openThreadId ? threads.find((t) => t.id === openThreadId) : null;
+
+  return (
+    <div className="rounded-xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      {/* Header */}
+      <div className="border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
+        <div className="flex items-center justify-between">
+          <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-zinc-50">
+            {openThread_ ? (
+              /* Back button when viewing a thread */
+              <button
+                type="button"
+                onClick={() => { setOpenThreadId(null); setPosts([]); }}
+                className="cursor-pointer flex h-5 w-5 items-center justify-center rounded text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                aria-label="Back to threads"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+                  <path fillRule="evenodd" d="M14 8a.75.75 0 0 1-.75.75H4.56l3.22 3.22a.75.75 0 1 1-1.06 1.06l-4.5-4.5a.75.75 0 0 1 0-1.06l4.5-4.5a.75.75 0 0 1 1.06 1.06L4.56 7.25h8.69A.75.75 0 0 1 14 8Z" clipRule="evenodd" />
+                </svg>
+              </button>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 text-emerald-500">
+                <path d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317.713 2.435 0 3.277 0 4.26v4.48Z" />
+              </svg>
+            )}
+            {openThread_ ? (
+              <span className="truncate">{openThread_.title}</span>
+            ) : (
+              <>
+                Threads
+                {totalCount > 0 && (
+                  <span className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-emerald-100 px-1.5 text-[10px] font-bold tabular-nums text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
+                    {totalCount}
+                  </span>
+                )}
+              </>
+            )}
+          </h2>
+          <div className="flex items-center gap-2">
+            {openThread_ ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 ring-1 ring-emerald-200/60 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/20">
+                {posts.length} {posts.length === 1 ? "post" : "posts"}
+              </span>
+            ) : (
+              <>
+                <div className="relative">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-emerald-400 dark:text-emerald-500"><path fillRule="evenodd" d="M9.965 11.026a5 5 0 1 1 1.06-1.06l2.755 2.754a.75.75 0 1 1-1.06 1.06l-2.755-2.754ZM10.5 7a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z" clipRule="evenodd" /></svg>
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search messages…"
+                    className="w-32 rounded-full border border-emerald-200/60 bg-emerald-50/50 py-1 pl-7 pr-2.5 text-[11px] text-emerald-700 placeholder:text-emerald-300 transition focus:border-emerald-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-100 dark:border-emerald-500/20 dark:bg-emerald-500/5 dark:text-emerald-300 dark:placeholder:text-emerald-500/50 dark:focus:border-emerald-500/40 dark:focus:bg-zinc-900 dark:focus:ring-emerald-500/10"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Thread list view ── */}
+      {!openThread_ && (
+        <>
+          {/* Add input */}
+          <div className="border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="pointer-events-none absolute left-2.5 top-[9px] h-3.5 w-3.5 text-emerald-400 z-10">
+                  <path d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z" />
+                </svg>
+                <MentionTextarea
+                  value={newTitle}
+                  onChange={setNewTitle}
+                  onSubmit={addThread}
+                  placeholder="add a thread"
+                  className="!bg-emerald-50/40 dark:!bg-emerald-500/5"
+                  inputClassName="!pl-8"
+                  rows={1}
+                  minHeight="34px"
+                  maxHeight="80px"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={addThread}
+                disabled={!newTitle.trim() || adding}
+                className="cursor-pointer flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-sm shadow-emerald-500/20 transition hover:shadow-emerald-500/40 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Add thread"
+              >
+                {adding ? (
+                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+                    <path d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* List */}
+          <div className="max-h-64 overflow-y-auto divide-y divide-zinc-50 dark:divide-zinc-800/50">
+            {loading && (
+              <div className="space-y-0 divide-y divide-zinc-50 dark:divide-zinc-800/50">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-start gap-3 px-5 py-3 animate-pulse">
+                    <div className="h-7 w-7 flex-shrink-0 rounded-full bg-zinc-200 dark:bg-zinc-700" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className={`h-3.5 rounded bg-zinc-200 dark:bg-zinc-700 ${i === 2 ? 'w-3/5' : i === 3 ? 'w-2/5' : 'w-4/5'}`} />
+                      <div className="h-2.5 w-1/3 rounded bg-zinc-100 dark:bg-zinc-800" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!loading && !search && threads.length === 0 && !newTitle && (
+              <div className="flex flex-col items-center justify-center py-8 px-5">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-500/10 mb-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-5 w-5 text-emerald-400">
+                    <path d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317.713 2.435 0 3.277 0 4.26v4.48Z" />
+                  </svg>
+                </div>
+                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">No threads yet</p>
+                <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Type above to start your first thread</p>
+              </div>
+            )}
+
+            {searching && (
+              <div className="flex items-center justify-center py-6">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+              </div>
+            )}
+
+            {/* ── Search results: show matching posts ── */}
+            {search.trim() && !searching && searchHits.map((hit) => (
+              <button
+                key={hit.id}
+                type="button"
+                onClick={() => {
+                  const t = threads.find((th) => th.id === hit.thread_id);
+                  if (t) { setSearch(""); openThread(t); }
+                  else {
+                    setSearch("");
+                    setOpenThreadId(hit.thread_id);
+                    setPosts([]);
+                    setReplyBody("");
+                    fetchPosts(hit.thread_id);
+                  }
+                }}
+                className="flex w-full items-start gap-3 px-5 py-2.5 text-left transition-colors hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30 cursor-pointer"
+              >
+                <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-100 to-teal-100 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-200/60 dark:from-emerald-500/20 dark:to-teal-500/20 dark:text-emerald-300 dark:ring-emerald-500/30">
+                  {hit.created_by_name ? getSpeakerInitials(hit.created_by_name) : "?"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 truncate">
+                    {hit.thread_title}
+                  </p>
+                  <p className="mt-0.5 text-sm text-zinc-700 dark:text-zinc-300 line-clamp-2">
+                    <MentionText text={hit.body} highlight={search} />
+                  </p>
+                  <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-400">
+                    {hit.created_by_name && <span className="truncate">{hit.created_by_name}</span>}
+                    <span className="flex-shrink-0">{relativeTime(hit.created_at)}</span>
+                  </div>
+                </div>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="mt-1.5 h-3.5 w-3.5 flex-shrink-0 text-zinc-300 dark:text-zinc-600">
+                  <path fillRule="evenodd" d="M6.22 4.22a.75.75 0 0 1 1.06 0l3.25 3.25a.75.75 0 0 1 0 1.06l-3.25 3.25a.75.75 0 0 1-1.06-1.06L8.94 8 6.22 5.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                </svg>
+              </button>
+            ))}
+
+            {search.trim() && !searching && searchHits.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-6 px-5">
+                <p className="text-xs text-zinc-400">No messages match &ldquo;{search}&rdquo;</p>
+              </div>
+            )}
+
+            {/* ── Normal thread list (when not searching) ── */}
+            {!search && threads.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => openThread(t)}
+                className="flex w-full items-start gap-3 px-5 py-2.5 text-left transition-colors hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30 cursor-pointer"
+              >
+                <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-100 to-teal-100 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-200/60 dark:from-emerald-500/20 dark:to-teal-500/20 dark:text-emerald-300 dark:ring-emerald-500/30">
+                  {t.created_by_name ? getSpeakerInitials(t.created_by_name) : "?"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 truncate">
+                    <MentionText text={t.title} />
+                  </p>
+                  <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-400">
+                    {t.created_by_name && <span className="truncate">{t.created_by_name}</span>}
+                    <span className="flex-shrink-0 flex items-center gap-0.5">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-2.5 w-2.5"><path d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317.713 2.435 0 3.277 0 4.26v4.48Z" /></svg>
+                      {t.post_count}
+                    </span>
+                    <span className="flex-shrink-0">{relativeTime(t.latest_post_at ?? t.created_at)}</span>
+                  </div>
+                </div>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="mt-1.5 h-3.5 w-3.5 flex-shrink-0 text-zinc-300 dark:text-zinc-600">
+                  <path fillRule="evenodd" d="M6.22 4.22a.75.75 0 0 1 1.06 0l3.25 3.25a.75.75 0 0 1 0 1.06l-3.25 3.25a.75.75 0 0 1-1.06-1.06L8.94 8 6.22 5.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                </svg>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ── Inline thread detail view ── */}
+      {openThread_ && (
+        <>
+          {/* Sub-header: thread author info */}
+          <div className="border-b border-zinc-100 px-5 py-2 dark:border-zinc-800">
+            <p className="text-[10px] text-zinc-400">
+              Started by {openThread_.created_by_name ?? "Unknown"} · {relativeTime(openThread_.created_at)}
+            </p>
+          </div>
+
+          {/* Posts */}
+          <div className="max-h-72 overflow-y-auto divide-y divide-zinc-50 dark:divide-zinc-800/50">
+            {postsLoading && (
+              <div className="flex items-center justify-center py-8">
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
+              </div>
+            )}
+
+            {!postsLoading && posts.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-8 px-5">
+                <p className="text-xs text-zinc-400">No replies yet — be the first!</p>
+              </div>
+            )}
+
+            {posts.map((post) => (
+              <div key={post.id} className="flex items-start gap-2.5 px-4 py-2.5">
+                <div
+                  className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-[8px] font-bold text-white ${avatarColor(post.created_by)}`}
+                >
+                  {getSpeakerInitials(post.created_by_name)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                      {post.created_by_name ?? "Unknown"}
+                    </span>
+                    <span className="text-[10px] text-zinc-400">
+                      {relativeTime(post.created_at)}
+                    </span>
+                    {post.edited_at && (
+                      <span className="text-[10px] italic text-zinc-400">(edited)</span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-sm text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap break-words">
+                    <MentionText text={post.body} />
+                  </p>
+                </div>
+              </div>
+            ))}
+            <div ref={postsEndRef} />
+          </div>
+
+          {/* Reply compose */}
+          <div className="border-t border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
+            <div className="flex items-center gap-2">
+              <MentionTextarea
+                value={replyBody}
+                onChange={setReplyBody}
+                onSubmit={sendReply}
+                placeholder="write a reply…"
+                className="flex-1 !bg-emerald-50/40 dark:!bg-emerald-500/5"
+                rows={1}
+                minHeight="34px"
+                maxHeight="80px"
+                disabled={replying}
+              />
+              <button
+                type="button"
+                onClick={sendReply}
+                disabled={!replyBody.trim() || replying}
+                className="cursor-pointer flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-sm shadow-emerald-500/20 transition hover:shadow-emerald-500/40 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Send reply"
+              >
+                {replying ? (
+                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+                    <path d="M2.87 2.298a.75.75 0 0 0-.812 1.021L3.39 6.624a1 1 0 0 0 .928.626H8.25a.75.75 0 0 1 0 1.5H4.318a1 1 0 0 0-.927.626l-1.333 3.305a.75.75 0 0 0 .812 1.021l11.07-3.548a.75.75 0 0 0 0-1.408L2.87 2.298Z" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  Overview Page                                                      */
+/* ================================================================== */
+
+export default function TranscriptOverviewPage() {
+  const params = useParams<{ transcriptId: string }>();
+  const transcriptId = params.transcriptId;
+
+  const [data, setData] = useState<TranscriptOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [activitySearch, setActivitySearch] = useState("");
+  const [commentsSearch, setCommentsSearch] = useState("");
+
+  const fetchOverview = useCallback(async (showLoader = true) => {
+    if (showLoader) setLoading(true);
+    try {
+      const r = await fetch(`/api/transcripts/${transcriptId}/overview`);
+      if (!r.ok) throw new Error(`Failed (${r.status})`);
+      setData(await r.json());
+    } catch (e: unknown) {
+      if (e instanceof Error) setError(e.message);
+    } finally {
+      if (showLoader) setLoading(false);
+    }
+  }, [transcriptId]);
+
+  const refreshActivity = useCallback(() => {
+    fetchOverview(false);
+  }, [fetchOverview]);
+
   useEffect(() => {
-    const handler = (e: globalThis.KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
-
-      if (e.code === "Space") {
-        e.preventDefault();
-        togglePlayback();
-      } else if (e.code === "ArrowLeft") {
-        e.preventDefault();
-        seekTo(playerTime - 5);
-      } else if (e.code === "ArrowRight") {
-        e.preventDefault();
-        seekTo(playerTime + 5);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [togglePlayback, seekTo, playerTime]);
-
-  /* ---------- Derived data ---------- */
-
-  const uniqueSpeakers = Array.from(new Set(sections.map((s) => s.speaker).filter(Boolean))) as string[];
-  const allTags = Array.from(new Set(sections.flatMap((s) => s.tags)));
-
-  const filteredSections = sections.filter((s) => {
-    if (filterSpeaker && s.speaker !== filterSpeaker) return false;
-    if (filterTag && !s.tags.includes(filterTag)) return false;
-    return true;
-  });
-
-
-
-  /* ---------- Search match count & per-section offsets ---------- */
-
-  const countOccurrences = (haystack: string, needle: string) => {
-    let count = 0, idx = 0;
-    const h = haystack.toLowerCase(), n = needle.toLowerCase();
-    while ((idx = h.indexOf(n, idx)) !== -1) { count++; idx += n.length; }
-    return count;
-  };
-
-  const sectionMatchOffsets = new Map<number, number>();
-  let totalMatches = 0;
-  if (searchQuery) {
-    for (const s of filteredSections) {
-      sectionMatchOffsets.set(s.id, totalMatches);
-      totalMatches += countOccurrences(s.edited_text ?? s.original_text ?? "", searchQuery);
-    }
-  }
-
-  // Reset match index when query or results change, and scroll to first match
-  useEffect(() => {
-    setSearchMatchIndex(0);
-    if (searchQuery) {
-      setTimeout(() => {
-        const el = document.querySelector('[data-search-match="0"]');
-        if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-      }, 50);
-    }
-  }, [searchQuery, filterSpeaker, filterTag]);
-
-  // Scroll to active match
-  const scrollToMatch = useCallback((idx: number) => {
-    setTimeout(() => {
-      const el = document.querySelector(`[data-search-match="${idx}"]`);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 50);
-  }, []);
-
-  const goToNextMatch = useCallback(() => {
-    if (totalMatches === 0) return;
-    const next = (searchMatchIndex + 1) % totalMatches;
-    setSearchMatchIndex(next);
-    scrollToMatch(next);
-  }, [totalMatches, searchMatchIndex, scrollToMatch]);
-
-  const goToPrevMatch = useCallback(() => {
-    if (totalMatches === 0) return;
-    const prev = (searchMatchIndex - 1 + totalMatches) % totalMatches;
-    setSearchMatchIndex(prev);
-    scrollToMatch(prev);
-  }, [totalMatches, searchMatchIndex, scrollToMatch]);
-
-  /* ---------- Export helpers ---------- */
-
-  const downloadFile = (content: string, filename: string, mime: string) => {
-    const blob = new Blob([content], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const exportAsText = () => {
-    const lines = sections.map((s) => {
-      const speaker = s.speaker ?? "Unknown";
-      const time = `[${formatTimestamp(s.begin_timestamp)} → ${formatTimestamp(s.end_timestamp)}]`;
-      const text = s.edited_text ?? s.original_text ?? "";
-      const tagLine = s.tags.length > 0 ? `  Tags: ${s.tags.join(", ")}` : "";
-      return `${speaker} ${time}\n${text}${tagLine ? "\n" + tagLine : ""}`;
-    });
-    const content = `Transcript #${transcriptId}\n${"=".repeat(40)}\n\n${lines.join("\n\n")}`;
-    downloadFile(content, `transcript-${transcriptId}.txt`, "text/plain;charset=utf-8");
-  };
-
-  const exportAsJson = () => {
-    const data = {
-      transcriptId,
-      exportedAt: new Date().toISOString(),
-      sections: sections.map((s) => ({
-        sectionId: s.section_id,
-        speaker: s.speaker,
-        beginTimestamp: s.begin_timestamp,
-        endTimestamp: s.end_timestamp,
-        originalText: s.original_text,
-        editedText: s.edited_text,
-        tags: s.tags,
-      })),
-    };
-    downloadFile(JSON.stringify(data, null, 2), `transcript-${transcriptId}.json`, "application/json");
-  };
-
-  /* ---------- Speaker color helper ---------- */
-
-  const speakerColors = [
-    { bg: "bg-orange-100 dark:bg-orange-500/20", text: "text-orange-700 dark:text-orange-300", ring: "ring-orange-200 dark:ring-orange-500/30" },
-    { bg: "bg-sky-100 dark:bg-sky-500/20", text: "text-sky-700 dark:text-sky-300", ring: "ring-sky-200 dark:ring-sky-500/30" },
-    { bg: "bg-violet-100 dark:bg-violet-500/20", text: "text-violet-700 dark:text-violet-300", ring: "ring-violet-200 dark:ring-violet-500/30" },
-    { bg: "bg-emerald-100 dark:bg-emerald-500/20", text: "text-emerald-700 dark:text-emerald-300", ring: "ring-emerald-200 dark:ring-emerald-500/30" },
-    { bg: "bg-rose-100 dark:bg-rose-500/20", text: "text-rose-700 dark:text-rose-300", ring: "ring-rose-200 dark:ring-rose-500/30" },
-    { bg: "bg-amber-100 dark:bg-amber-500/20", text: "text-amber-700 dark:text-amber-300", ring: "ring-amber-200 dark:ring-amber-500/30" },
-  ];
-
-  const getSpeakerColor = (speaker: string | null) => {
-    if (!speaker) return speakerColors[0];
-    const idx = uniqueSpeakers.indexOf(speaker);
-    return speakerColors[(idx >= 0 ? idx : 0) % speakerColors.length];
-  };
-
-  const getSpeakerInitials = (speaker: string | null) => {
-    if (!speaker) return "?";
-    return speaker
-      .split(/[\s_-]+/)
-      .map((w) => w[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
-  };
-
-  /* ---------- Render ---------- */
+    fetchOverview();
+  }, [fetchOverview]);
 
   if (loading) {
     return (
-      <section className="flex flex-col items-center justify-center gap-4 py-24">
-        <div className="relative h-12 w-12">
-          <div className="absolute inset-0 animate-spin rounded-full border-4 border-orange-200 border-t-orange-500 dark:border-orange-800 dark:border-t-orange-400" />
+      <section className="space-y-6">
+        {/* Header skeleton */}
+        <div className="relative rounded-xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 overflow-hidden animate-pulse">
+          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-orange-200 via-amber-200 to-orange-200 dark:from-orange-800 dark:via-amber-800 dark:to-orange-800" />
+          <div className="flex flex-wrap items-center gap-4 px-4 pt-5 pb-4">
+            <div className="h-5 w-48 rounded bg-zinc-200 dark:bg-zinc-700" />
+            <div className="h-5 w-20 rounded-full bg-zinc-200 dark:bg-zinc-700" />
+            <div className="flex-1" />
+            <div className="h-8 w-28 rounded-lg bg-zinc-200 dark:bg-zinc-700" />
+          </div>
         </div>
-        <p className="text-sm font-medium text-zinc-400 animate-pulse">Loading transcript…</p>
+
+        {/* Top row: Todo + Threads */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Todo card */}
+          <div className="rounded-xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-zinc-50">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 text-indigo-500">
+                  <path fillRule="evenodd" d="M11.986 3H12a2 2 0 0 1 2 2v6a2 2 0 0 1-1.5 1.937V7A2.5 2.5 0 0 0 10 4.5H4.063A2 2 0 0 1 6 3h.014A2.25 2.25 0 0 1 8.25 1h-.5a2.25 2.25 0 0 1 2.236 2ZM10.5 4v-.75a.75.75 0 0 0-.75-.75h-3.5a.75.75 0 0 0-.75.75V4h5Z" clipRule="evenodd" />
+                  <path fillRule="evenodd" d="M2 7a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7Zm6.585 1.08a.75.75 0 0 1 .336 1.005l-1.75 3.5a.75.75 0 0 1-1.16.234l-1.25-1.25a.75.75 0 0 1 1.06-1.06l.557.556 1.202-2.649a.75.75 0 0 1 1.005-.337Z" clipRule="evenodd" />
+                </svg>
+                To-Do
+              </h2>
+            </div>
+            <div className="flex items-center justify-center py-12">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+            </div>
+          </div>
+
+          {/* Threads card */}
+          <div className="rounded-xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-zinc-50">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 text-emerald-500">
+                  <path d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317.713 2.435 0 3.277 0 4.26v4.48Z" />
+                </svg>
+                Threads
+              </h2>
+            </div>
+            <div className="flex items-center justify-center py-12">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom row: Comments + Activity */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Comments card */}
+          <div className="rounded-xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-zinc-50">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 text-sky-500">
+                  <path fillRule="evenodd" d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317 .713 2.435 0 3.277 0 4.26v4.48Z" clipRule="evenodd" />
+                </svg>
+                Recent Comments
+              </h2>
+            </div>
+            <div className="flex items-center justify-center py-12">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+            </div>
+          </div>
+
+          {/* Activity card */}
+          <div className="rounded-xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-zinc-50">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 text-orange-500">
+                  <path fillRule="evenodd" d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z" clipRule="evenodd" />
+                </svg>
+                Recent Activity
+              </h2>
+            </div>
+            <div className="flex items-center justify-center py-12">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-orange-500 border-t-transparent" />
+            </div>
+          </div>
+        </div>
       </section>
     );
   }
 
-  if (error) {
+  if (error || !data) {
     return (
       <section className="flex flex-col items-center justify-center gap-6 py-24">
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
@@ -1401,719 +966,254 @@ export default function TranscriptEditorPage() {
             <path fillRule="evenodd" d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003ZM12 8.25a.75.75 0 0 1 .75.75v3.75a.75.75 0 0 1-1.5 0V9a.75.75 0 0 1 .75-.75Zm0 8.25a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z" clipRule="evenodd" />
           </svg>
         </div>
-        <div className="text-center">
-          <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{error}</p>
-          <p className="mt-1 text-xs text-zinc-400">Something went wrong loading this transcript.</p>
-        </div>
-        <button
-          onClick={fetchSections}
-          className="rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-orange-500/25 transition hover:shadow-orange-500/40 hover:brightness-110 active:scale-[0.98]"
-        >
-          Try Again
-        </button>
+        <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{error ?? "Not found"}</p>
       </section>
     );
   }
 
+  const { speakers, recent_activity, recent_comments } = data;
+
+  const detailStats = [
+    { label: "Sections", value: data.total_sections, icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-orange-500"><path d="M2 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm4.5 2a.75.75 0 0 0 0 1.5h3a.75.75 0 0 0 0-1.5h-3Zm0 3a.75.75 0 0 0 0 1.5h3a.75.75 0 0 0 0-1.5h-3Z" /></svg>
+    )},
+    { label: "Edited", value: data.edited_sections, icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-amber-500"><path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.262a1.75 1.75 0 0 0 0-2.474Z" /><path d="M4.75 3.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h6.5c.69 0 1.25-.56 1.25-1.25V9A.75.75 0 0 1 14 9v2.25A2.75 2.75 0 0 1 11.25 14h-6.5A2.75 2.75 0 0 1 2 11.25v-6.5A2.75 2.75 0 0 1 4.75 2H7a.75.75 0 0 1 0 1.5H4.75Z" /></svg>
+    )},
+    { label: "Comments", value: data.total_comments, icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-sky-500"><path fillRule="evenodd" d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317 .713 2.435 0 3.277 0 4.26v4.48Z" clipRule="evenodd" /></svg>
+    )},
+    { label: "Speakers", value: speakers.length, icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-violet-500"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12.735 14c.618 0 1.093-.561.872-1.139a6.002 6.002 0 0 0-11.215 0c-.22.578.254 1.139.872 1.139h9.47Z" /></svg>
+    )},
+    { label: "Duration", value: data.total_duration ?? "—", icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-emerald-500"><path fillRule="evenodd" d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z" clipRule="evenodd" /></svg>
+    )},
+  ];
+
   return (
-    <section className="flex flex-col h-[calc(100vh-5rem)] -m-6">
-      {/* Hidden HTML5 audio element — drives the real playback */}
-      {hasAudio && (
-        <audio
-          ref={audioRef}
-          src={`/api/transcripts/${transcriptId}/audio`}
-          preload="auto"
-          onLoadedMetadata={() => {
-            const a = audioRef.current;
-            if (a && a.duration && isFinite(a.duration)) {
-              setAudioDuration(a.duration);
-            }
-          }}
-          onTimeUpdate={() => {
-            const a = audioRef.current;
-            if (a) setPlayerTime(a.currentTime);
-          }}
-          onEnded={() => {
-            setIsPlaying(false);
-          }}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          onError={(e) => {
-            const a = e.currentTarget;
-            console.error("[AudioPlayer] Failed to load audio.", {
-              src: a.src,
-              networkState: a.networkState,
-              error: a.error?.message ?? a.error?.code,
-            });
-            setHasAudio(false);
-            setIsPlaying(false);
-          }}
-        />
-      )}
-
-      {/* ── Top area: Header with Audio Player ── */}
-      <div className="flex-shrink-0 relative mx-6 mt-6 rounded-2xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-        {/* decorative gradient strip */}
-        <div className="absolute inset-x-0 top-0 h-1 rounded-t-2xl bg-gradient-to-r from-orange-400 via-amber-400 to-orange-500" />
-
-        <div className="p-5 pt-6">
-          {/* Row 1: Title + Search + Export */}
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-amber-500 shadow-md shadow-orange-500/20">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5 text-white">
-                  <path fillRule="evenodd" d="M4.125 3C3.089 3 2.25 3.84 2.25 4.875V18a3 3 0 0 0 3 3h15a3 3 0 0 1-3-3V4.875C17.25 3.839 16.41 3 15.375 3H4.125ZM12 9.75a.75.75 0 0 0 0 1.5h1.5a.75.75 0 0 0 0-1.5H12Zm-.75-2.25a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5H12a.75.75 0 0 1-.75-.75ZM6 12.75a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5H6Zm-.75 3.75a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75ZM6 6.75a.75.75 0 0 0-.75.75v3c0 .414.336.75.75.75h3a.75.75 0 0 0 .75-.75v-3A.75.75 0 0 0 9 6.75H6Z" clipRule="evenodd" />
-                  <path d="M18.75 6.75h1.875c.621 0 1.125.504 1.125 1.125V18a1.5 1.5 0 0 1-3 0V6.75Z" />
-                </svg>
-              </div>
-              <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-                Transcript #{transcriptId}
-              </h2>
-
-              <div className="ml-2 flex items-center gap-2">
-                <SearchSelect
-                  value={filterSpeaker}
-                  onChange={setFilterSpeaker}
-                  options={uniqueSpeakers}
-                  placeholder="All speakers"
-                  className="w-40"
-                  icon={
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
-                      <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12.735 14c.618 0 1.093-.561.872-1.139a6.002 6.002 0 0 0-11.215 0c-.22.578.254 1.139.872 1.139h9.47Z" />
-                    </svg>
-                  }
-                />
-
-                <SearchSelect
-                  value={filterTag}
-                  onChange={setFilterTag}
-                  options={allTags}
-                  placeholder="All tags"
-                  className="w-40"
-                  icon={
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
-                      <path fillRule="evenodd" d="M4.5 2A2.5 2.5 0 0 0 2 4.5v2.879a2.5 2.5 0 0 0 .732 1.767l4.5 4.5a2.5 2.5 0 0 0 3.536 0l2.878-2.878a2.5 2.5 0 0 0 0-3.536l-4.5-4.5A2.5 2.5 0 0 0 7.38 2H4.5ZM5 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
-                    </svg>
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2.5">
-
-            <div className="relative">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400">
-                <path fillRule="evenodd" d="M9.965 11.026a5 5 0 1 1 1.06-1.06l2.755 2.754a.75.75 0 1 1-1.06 1.06l-2.755-2.754ZM10.5 7a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z" clipRule="evenodd" />
-              </svg>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && searchQuery) {
-                    e.preventDefault();
-                    if (e.shiftKey) goToPrevMatch(); else goToNextMatch();
-                  }
-                }}
-                placeholder="Search transcript.."
-                className={`w-64 rounded-xl border bg-zinc-50 py-2 pl-9 text-sm font-medium placeholder:text-zinc-400 shadow-sm transition-all hover:border-orange-300 hover:bg-orange-50 focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-200 dark:bg-zinc-800 dark:placeholder:text-zinc-500 dark:hover:border-orange-500/40 dark:hover:bg-orange-500/10 dark:focus:border-orange-500/50 dark:focus:ring-orange-500/20 ${
-                  searchQuery ? "pr-20 border-orange-300 dark:border-orange-500/40" : "pr-8 border-zinc-200 dark:border-zinc-700"
-                }`}
-              />
-              {searchQuery && (
-                <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
-                  <span className="text-[10px] font-semibold tabular-nums text-zinc-400">
-                    {totalMatches > 0 ? `${searchMatchIndex + 1}/${totalMatches}` : "0/0"}
+    <section className="space-y-6">
+      {/* ── Transcript Header ── */}
+      <div className="relative rounded-xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-orange-400 via-amber-400 to-orange-500" />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 pt-4 pb-3">
+          {/* Title with emoji indicators */}
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            {(() => {
+              const raw = data.title ?? `Transcript #${transcriptId}`;
+              const parts = raw.split(" — ");
+              const participantName = parts[0]?.trim();
+              // Extract mic label from the part after "—", stripping "Lesson X" at the end
+              const afterDash = parts[1]?.trim() ?? "";
+              const micLabel = afterDash.replace(/\s*Lesson\s+\S+$/i, "").trim();
+              return (
+                <>
+                  <span className="text-base font-bold tracking-tight text-zinc-900 dark:text-zinc-50 truncate">
+                    {participantName}
                   </span>
-                  <button
-                    type="button"
-                    onClick={goToPrevMatch}
-                    disabled={totalMatches === 0}
-                    className="flex h-4 w-4 cursor-pointer items-center justify-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600 disabled:cursor-default disabled:opacity-30 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
-                    aria-label="Previous match"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
-                      <path fillRule="evenodd" d="M11.78 9.78a.75.75 0 0 1-1.06 0L8 7.06 5.28 9.78a.75.75 0 0 1-1.06-1.06l3.25-3.25a.75.75 0 0 1 1.06 0l3.25 3.25a.75.75 0 0 1 0 1.06Z" clipRule="evenodd" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={goToNextMatch}
-                    disabled={totalMatches === 0}
-                    className="flex h-4 w-4 cursor-pointer items-center justify-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600 disabled:cursor-default disabled:opacity-30 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
-                    aria-label="Next match"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
-                      <path fillRule="evenodd" d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery("")}
-                    className="flex h-4 w-4 cursor-pointer items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
-                    aria-label="Clear search"
-                  >
-                    ×
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* export dropdown */}
-            <div className="relative" ref={exportRef}>
-              <button
-                type="button"
-                title="Export transcript menu"
-                aria-label="Export transcript menu"
-                onClick={() => setExportOpen((prev) => !prev)}
-                className={`cursor-pointer inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold shadow-sm transition-all ${
-                  exportOpen
-                    ? "border-orange-500 bg-orange-600 text-white ring-2 ring-orange-300 shadow-orange-200 dark:border-orange-400 dark:bg-orange-500 dark:ring-orange-500/30 dark:shadow-orange-500/20"
-                    : "border-orange-400 bg-orange-500 text-white shadow-orange-200 hover:bg-orange-600 hover:shadow-md hover:shadow-orange-200 dark:border-orange-500 dark:bg-orange-500 dark:shadow-orange-500/20 dark:hover:bg-orange-400"
-                }`}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
-                  <path fillRule="evenodd" d="M4 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V6.621a1.5 1.5 0 0 0-.44-1.06L9.94 2.439A1.5 1.5 0 0 0 8.878 2H4Zm4 3.5a.75.75 0 0 1 .75.75v2.69l.72-.72a.75.75 0 1 1 1.06 1.06l-2 2a.75.75 0 0 1-1.06 0l-2-2a.75.75 0 0 1 1.06-1.06l.72.72V6.25A.75.75 0 0 1 8 5.5Z" clipRule="evenodd" />
-                </svg>
-                Export
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className={`h-3 w-3 text-white/70 transition-transform ${exportOpen ? "rotate-180" : ""}`}>
-                  <path fillRule="evenodd" d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-                </svg>
-              </button>
-
-              {exportOpen && (
-                <div className="absolute right-0 top-full z-30 mt-1.5 w-52 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-800">
-                  <div className="py-1">
-                    <button
-                      type="button"
-                      onClick={() => { exportAsText(); setExportOpen(false); }}
-                      className="flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors hover:bg-orange-50 dark:hover:bg-orange-500/10"
-                    >
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-700">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 text-zinc-500 dark:text-zinc-400">
-                          <path fillRule="evenodd" d="M4 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V6.621a1.5 1.5 0 0 0-.44-1.06L9.94 2.439A1.5 1.5 0 0 0 8.878 2H4ZM5.25 7.5A.75.75 0 0 1 6 6.75h4a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Zm0 3a.75.75 0 0 1 .75-.75h4a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
-                        </svg>
-                      </div>
-                      <p className="font-semibold text-zinc-700 dark:text-zinc-200">Text File</p>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { exportAsJson(); setExportOpen(false); }}
-                      className="flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors hover:bg-orange-50 dark:hover:bg-orange-500/10"
-                    >
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-700">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 text-zinc-500 dark:text-zinc-400">
-                          <path fillRule="evenodd" d="M4 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V6.621a1.5 1.5 0 0 0-.44-1.06L9.94 2.439A1.5 1.5 0 0 0 8.878 2H4Zm1 5.75a.75.75 0 0 1 .75-.75h.5a.75.75 0 0 1 0 1.5h-.5a.75.75 0 0 1-.75-.75Zm3 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5a.75.75 0 0 1-.75-.75ZM5.75 10a.75.75 0 0 0 0 1.5h.5a.75.75 0 0 0 0-1.5h-.5Zm2.25.75a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
-                        </svg>
-                      </div>
-                      <p className="font-semibold text-zinc-700 dark:text-zinc-200">JSON File</p>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Audio Player ── */}
-        <div className="border-t border-zinc-200/80 pb-3 dark:border-zinc-800">
-          {/* progress bar (clickable) */}
-          <div
-            className="group/progress relative h-1.5 w-full cursor-pointer bg-zinc-200/60 transition-all hover:h-2.5 dark:bg-zinc-700/60"
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const pct = (e.clientX - rect.left) / rect.width;
-              seekTo(pct * totalDuration);
-            }}
-          >
-            <div
-              className="absolute inset-y-0 left-0 bg-gradient-to-r from-orange-500 to-amber-400 transition-all duration-200"
-              style={{ width: `${totalDuration > 0 ? (playerTime / totalDuration) * 100 : 0}%` }}
-            />
-            <div
-              className="absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border-2 border-white bg-orange-500 shadow opacity-0 transition-all duration-200 group-hover/progress:opacity-100 dark:border-zinc-900"
-              style={{ left: `calc(${totalDuration > 0 ? (playerTime / totalDuration) * 100 : 0}% - 6px)` }}
-            />
-          </div>
-
-          <div className="flex items-center gap-4 px-5 py-2.5">
-            {/* Left: controls */}
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => seekTo(playerTime - 10)}
-                className="cursor-pointer rounded-lg p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-                aria-label="Skip back 10 seconds"
-                title="Back 10s"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" className="h-6 w-6">
-                  <path d="M12.5 4V2L9 5.5l3.5 3V6.5c3.59 0 6.5 2.91 6.5 6.5s-2.91 6.5-6.5 6.5S6 16.59 6 13H4c0 4.69 3.81 8.5 8.5 8.5s8.5-3.81 8.5-8.5-3.81-8.5-8.5-8.5Z" fill="currentColor" />
-                  <text x="12.5" y="15.5" textAnchor="middle" fontSize="7.5" fontWeight="bold" fontFamily="system-ui, sans-serif" fill="currentColor">10</text>
-                </svg>
-              </button>
-
-              <button
-                type="button"
-                onClick={togglePlayback}
-                className={`cursor-pointer rounded-full p-2.5 transition-all duration-200 ${
-                  isPlaying
-                    ? "bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-lg shadow-orange-500/30 hover:shadow-orange-500/50 hover:brightness-110 active:scale-95"
-                    : "bg-gradient-to-br from-orange-400 to-amber-500 text-white shadow-md shadow-orange-500/20 hover:shadow-lg hover:shadow-orange-500/30 hover:brightness-110 active:scale-95"
-                }`}
-                aria-label={isPlaying ? "Pause" : "Play"}
-              >
-                {isPlaying ? (
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
-                    <path fillRule="evenodd" d="M6.75 5.25a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-1.5 0V6a.75.75 0 0 1 .75-.75Zm10.5 0a.75.75 0 0 1 .75.75v12a.75.75 0 0 1-1.5 0V6a.75.75 0 0 1 .75-.75Z" clipRule="evenodd" />
-                  </svg>
-                ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
-                    <path fillRule="evenodd" d="M4.5 5.653c0-1.427 1.529-2.33 2.779-1.643l11.54 6.347c1.295.712 1.295 2.573 0 3.286L7.28 19.99c-1.25.687-2.779-.217-2.779-1.643V5.653Z" clipRule="evenodd" />
-                  </svg>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => seekTo(playerTime + 10)}
-                className="cursor-pointer rounded-lg p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-                aria-label="Skip forward 10 seconds"
-                title="Forward 10s"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" className="h-6 w-6">
-                  <path d="M11.5 4V2l3.5 3.5-3.5 3V6.5C7.91 6.5 5 9.41 5 13s2.91 6.5 6.5 6.5S18 16.59 18 13h2c0 4.69-3.81 8.5-8.5 8.5S3 17.69 3 13s3.81-8.5 8.5-8.5Z" fill="currentColor" />
-                  <text x="11.5" y="15.5" textAnchor="middle" fontSize="7.5" fontWeight="bold" fontFamily="system-ui, sans-serif" fill="currentColor">10</text>
-                </svg>
-              </button>
-            </div>
-
-            {/* Center: time + active section info */}
-            <div className="flex flex-1 items-center gap-3 min-w-0">
-              <span className="inline-flex items-center font-mono text-xs font-semibold tabular-nums text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
-                {formatSecondsToTime(playerTime)}
-                <span className="mx-1 text-zinc-300 dark:text-zinc-600">/</span>
-                {formatSecondsToTime(totalDuration)}
-              </span>
-
-              {/* Speed selector */}
-              <div ref={speedMenuRef} className="relative">
-                <button
-                  type="button"
-                  onClick={() => setSpeedMenuOpen(!speedMenuOpen)}
-                  className={`cursor-pointer rounded-lg px-2 py-1 text-[11px] font-bold tabular-nums transition-all ${
-                    playbackSpeed !== 1
-                      ? "bg-orange-100 text-orange-600 hover:bg-orange-200 dark:bg-orange-500/15 dark:text-orange-400 dark:hover:bg-orange-500/25"
-                      : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
-                  }`}
-                  title="Playback speed"
-                >
-                  {playbackSpeed}x
-                </button>
-                {speedMenuOpen && (
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
-                    {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
-                      <button
-                        key={speed}
-                        type="button"
-                        onClick={() => { setPlaybackSpeed(speed); setSpeedMenuOpen(false); }}
-                        className={`cursor-pointer flex w-full items-center gap-2 px-4 py-1.5 text-xs font-semibold tabular-nums transition-colors ${
-                          playbackSpeed === speed
-                            ? "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400"
-                            : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800"
-                        }`}
-                      >
-                        {playbackSpeed === speed && (
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 text-orange-500">
-                            <path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
-                          </svg>
-                        )}
-                        {playbackSpeed !== speed && <span className="w-3" />}
-                        {speed}x
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="h-4 w-px bg-zinc-200 dark:bg-zinc-700" />
-
-              {displaySection ? (
-                <div className="flex items-center gap-2 min-w-0 transition-opacity duration-200" style={{ opacity: activeSection ? 1 : 0.5 }}>
-                  <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-orange-100 text-[8px] font-bold text-orange-600 dark:bg-orange-500/20 dark:text-orange-400">
-                    {getSpeakerInitials(displaySection.speaker)}
-                  </div>
-                  <span className="truncate text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                    {displaySection.speaker ?? "Unknown"}
-                  </span>
-                  <span className="hidden sm:inline text-[10px] text-zinc-400 dark:text-zinc-500">
-                    {formatTimestamp(displaySection.begin_timestamp)} → {formatTimestamp(displaySection.end_timestamp)}
-                  </span>
-                </div>
-              ) : hasAudio && isPlaying ? (
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-orange-400 opacity-75" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-orange-500" />
-                  </span>
-                  <span className="text-xs font-medium text-orange-600 dark:text-orange-400">
-                    Playing audio
-                  </span>
-                  {sections.length === 0 && (
-                    <span className="hidden sm:inline text-[10px] text-zinc-400 dark:text-zinc-500">
-                      — no transcript sections loaded
+                  {micLabel && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700 ring-1 ring-amber-200/80 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/20">
+                      🎙️ {micLabel}
                     </span>
                   )}
-                </div>
-              ) : hasAudio ? (
-                <span className="text-xs text-zinc-400 dark:text-zinc-500 italic">
-                  {sections.length > 0 ? "No section at this time" : "Audio loaded — press play"}
-                </span>
-              ) : (
-                <span className="text-xs text-zinc-400 dark:text-zinc-500 italic">
-                  No audio file uploaded
-                </span>
-              )}
-            </div>
-
-            {/* Right: volume + waveform */}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setIsMuted(!isMuted)}
-                className="cursor-pointer rounded-lg p-1.5 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-                aria-label={isMuted ? "Unmute" : "Mute"}
-              >
-                {isMuted || volume === 0 ? (
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
-                    <path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.318.664-2.66 1.905A9.76 9.76 0 0 0 1.5 12c0 .898.121 1.768.35 2.595.341 1.24 1.518 1.905 2.659 1.905h1.93l4.5 4.5c.945.945 2.561.276 2.561-1.06V4.06ZM17.78 9.22a.75.75 0 1 0-1.06 1.06L18.44 12l-1.72 1.72a.75.75 0 1 0 1.06 1.06l1.72-1.72 1.72 1.72a.75.75 0 1 0 1.06-1.06L20.56 12l1.72-1.72a.75.75 0 1 0-1.06-1.06l-1.72 1.72-1.72-1.72Z" />
-                  </svg>
-                ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
-                    <path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.318.664-2.66 1.905A9.76 9.76 0 0 0 1.5 12c0 .898.121 1.768.35 2.595.341 1.24 1.518 1.905 2.659 1.905h1.93l4.5 4.5c.945.945 2.561.276 2.561-1.06V4.06ZM18.584 5.106a.75.75 0 0 1 1.06 0c3.808 3.807 3.808 9.98 0 13.788a.75.75 0 0 1-1.06-1.06 8.25 8.25 0 0 0 0-11.668.75.75 0 0 1 0-1.06Z" />
-                    <path d="M15.932 7.757a.75.75 0 0 1 1.061 0 6 6 0 0 1 0 8.486.75.75 0 0 1-1.06-1.061 4.5 4.5 0 0 0 0-6.364.75.75 0 0 1 0-1.06Z" />
-                  </svg>
-                )}
-              </button>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={isMuted ? 0 : volume}
-                onChange={(e) => { setVolume(Number(e.target.value)); if (isMuted) setIsMuted(false); }}
-                className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-zinc-200 accent-orange-500 dark:bg-zinc-700"
-                aria-label="Volume"
-              />
-
-              {/* Waveform placeholder */}
-              <div className="hidden sm:flex items-center gap-[2px] h-6 ml-2">
-                {[3, 5, 8, 4, 7, 10, 6, 9, 4, 7, 5, 8, 3, 6, 9, 5, 7, 4, 8, 6].map((h, i) => (
-                  <div
-                    key={i}
-                    className={`w-[2px] rounded-full transition-all duration-300 ${
-                      isPlaying && totalDuration > 0 && (i / 20) <= (playerTime / totalDuration)
-                        ? "bg-orange-400 dark:bg-orange-500"
-                        : "bg-zinc-200 dark:bg-zinc-700"
-                    }`}
-                    style={{
-                      height: `${h * 2.4}px`,
-                      animationDelay: isPlaying ? `${i * 80}ms` : undefined,
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
+                  {data.lesson_number && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-0.5 text-xs font-semibold text-violet-700 ring-1 ring-violet-200/80 dark:bg-violet-500/10 dark:text-violet-400 dark:ring-violet-500/20">
+                      📓 Lesson {data.lesson_number}
+                    </span>
+                  )}
+                </>
+              );
+            })()}
           </div>
+
+          {/* Stats strip */}
+          <div className="flex items-center gap-3 rounded-lg border border-zinc-100 bg-zinc-50/80 px-3 py-1.5 dark:border-zinc-800 dark:bg-zinc-800/50">
+            {detailStats.map((s, i) => (
+              <div key={s.label} className="flex items-center gap-1" title={s.label}>
+                {s.icon}
+                <span className="text-xs font-bold tabular-nums text-zinc-700 dark:text-zinc-300">{s.value}</span>
+                {i < detailStats.length - 1 && <span className="ml-2 text-zinc-200 dark:text-zinc-700">·</span>}
+              </div>
+            ))}
+          </div>
+
+          {/* Editor button */}
+          <Link
+            href={`/transcriptions/${transcriptId}/editor`}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-2 text-xs font-semibold text-white shadow-sm shadow-orange-500/20 transition hover:shadow-orange-500/30 hover:brightness-110 active:scale-[0.98]"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+              <path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.262a1.75 1.75 0 0 0 0-2.474Z" />
+              <path d="M4.75 3.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h6.5c.69 0 1.25-.56 1.25-1.25V9A.75.75 0 0 1 14 9v2.25A2.75 2.75 0 0 1 11.25 14h-6.5A2.75 2.75 0 0 1 2 11.25v-6.5A2.75 2.75 0 0 1 4.75 2H7a.75.75 0 0 1 0 1.5H4.75Z" />
+            </svg>
+            Open Editor
+          </Link>
         </div>
       </div>
 
-      {/* ── Section list ── */}
-      <div ref={sectionListRef} className="flex-1 overflow-y-auto px-6 pt-4 pb-6 space-y-2.5">
-        {filteredSections.length === 0 && sections.length > 0 && (
-          <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-zinc-300 py-16 dark:border-zinc-700">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-10 w-10 text-zinc-300 dark:text-zinc-600">
-              <path fillRule="evenodd" d="M10.5 3.75a6.75 6.75 0 1 0 0 13.5 6.75 6.75 0 0 0 0-13.5ZM2.25 10.5a8.25 8.25 0 1 1 14.59 5.28l4.69 4.69a.75.75 0 1 1-1.06 1.06l-4.69-4.69A8.25 8.25 0 0 1 2.25 10.5Z" clipRule="evenodd" />
-            </svg>
-            <p className="text-sm font-medium text-zinc-400 dark:text-zinc-500">No sections match the current filters.</p>
-            <button
-              type="button"
-              onClick={() => { setFilterSpeaker(""); setFilterTag(""); setSearchQuery(""); }}
-              className="mt-1 text-xs font-semibold text-orange-500 hover:text-orange-600 dark:text-orange-400"
-            >
-              Clear filters
-            </button>
-          </div>
-        )}
-
-        {sections.length === 0 && !loading && (
-          <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-zinc-300 py-16 dark:border-zinc-700">
-            {hasAudio ? (
-              <>
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-500/15">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-7 w-7 text-orange-500 dark:text-orange-400">
-                    <path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.318.664-2.66 1.905A9.76 9.76 0 0 0 1.5 12c0 .898.121 1.768.35 2.595.341 1.24 1.518 1.905 2.659 1.905h1.93l4.5 4.5c.945.945 2.561.276 2.561-1.06V4.06ZM18.584 5.106a.75.75 0 0 1 1.06 0c3.808 3.807 3.808 9.98 0 13.788a.75.75 0 0 1-1.06-1.06 8.25 8.25 0 0 0 0-11.668.75.75 0 0 1 0-1.06Z" />
-                    <path d="M15.932 7.757a.75.75 0 0 1 1.061 0 6 6 0 0 1 0 8.486.75.75 0 0 1-1.06-1.061 4.5 4.5 0 0 0 0-6.364.75.75 0 0 1 0-1.06Z" />
-                  </svg>
-                </div>
-                <div className="text-center">
-                  <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">Audio is ready — no transcript sections yet</p>
-                  <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">Use the player above to listen. Transcript sections will appear here once the audio is processed.</p>
-                </div>
-              </>
-            ) : (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-10 w-10 text-zinc-300 dark:text-zinc-600">
-                  <path fillRule="evenodd" d="M4.848 2.771A49.144 49.144 0 0 1 12 2.25c2.43 0 4.817.178 7.152.52a1.595 1.595 0 0 1 1.348 1.58v7.95c0 .713-.471 1.345-1.152 1.546a48.34 48.34 0 0 0-2.398.757 16.906 16.906 0 0 0-.09.04l-.003.002H16.85l-.004.001a3.482 3.482 0 0 0-.135.071 14.205 14.205 0 0 0-1.534 1.016c-.88.69-1.927 1.716-2.302 3.186a2.27 2.27 0 0 1-.385.82c-.062.072-.169.165-.326.166h-.008c-.157-.001-.264-.094-.326-.166a2.27 2.27 0 0 1-.385-.82c-.375-1.47-1.422-2.497-2.302-3.186a14.205 14.205 0 0 0-1.534-1.016 3.482 3.482 0 0 0-.135-.07l-.004-.002h-.001l-.003-.002a16.906 16.906 0 0 0-.09-.04 48.34 48.34 0 0 0-2.398-.757A1.594 1.594 0 0 1 3.5 12.3V4.35c0-.78.56-1.447 1.348-1.58Z" clipRule="evenodd" />
-                </svg>
-                <div className="text-center">
-                  <p className="text-sm font-medium text-zinc-400 dark:text-zinc-500">No transcript sections loaded</p>
-                  <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">Upload an audio file to get started.</p>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {filteredSections.map((section, idx) => {
-          const tags = section.tags;
-          const isSectionActive = activeSectionId === section.id;
-          const isSaving = savingId === section.id;
-          const color = getSpeakerColor(section.speaker);
-
-          // Compute match offsets for this section
-          const baseOffset = sectionMatchOffsets.get(section.id) ?? 0;
-
-          return (
-            <div key={section.id} className="flex items-center gap-3" data-section-id={section.id}>
-              {/* Play button – outside the card */}
-              <button
-                type="button"
-                onClick={() => handlePlay(section)}
-                className={`cursor-pointer flex-shrink-0 rounded-full p-2.5 transition-all duration-200 ${
-                  isSectionActive && isPlaying
-                    ? "bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-lg shadow-orange-500/30 hover:shadow-orange-500/50 hover:brightness-110 active:scale-95"
-                    : "bg-gradient-to-br from-orange-400 to-amber-500 text-white shadow-md shadow-orange-500/20 hover:shadow-lg hover:shadow-orange-500/30 hover:brightness-110 active:scale-95"
-                }`}
-                aria-label={isSectionActive && isPlaying ? "Playing" : "Play from this section"}
-              >
-                <PlayIcon playing={isSectionActive && isPlaying} />
-              </button>
-
-              {/* Card */}
-              <div
-                className={`group relative flex-1 min-w-0 rounded-2xl border bg-white shadow-sm transition-all duration-200 hover:shadow-md dark:bg-zinc-900 ${
-                  isSectionActive
-                    ? "border-orange-300 shadow-orange-100 ring-2 ring-orange-200/70 dark:border-orange-500/50 dark:shadow-orange-500/5 dark:ring-orange-500/20"
-                    : "border-zinc-200/80 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700"
-                }`}
-              >
-                {/* left accent stripe */}
-                <div className={`absolute inset-y-0 left-0 w-1 rounded-l-2xl ${isSectionActive ? "bg-gradient-to-b from-orange-400 to-amber-400" : color.bg}`} />
-
-                {/* saving indicator */}
-                {isSaving && (
-                  <div className="absolute left-1/2 -translate-x-1/2 top-4 z-10 flex items-center gap-2 rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-600 dark:bg-orange-500/10 dark:text-orange-400">
-                    <div className="h-3 w-3 animate-spin rounded-full border-2 border-orange-400 border-t-transparent" />
-                    Saving…
-                  </div>
-                )}
-
-                <div className="flex">
-                  {/* ── Left: transcript content ── */}
-                  <div className="flex-1 min-w-0 p-3.5 pl-5">
-                    {/* speaker + timestamps */}
-                    <div className="flex flex-wrap items-center gap-2.5">
-                      <div className="flex items-center gap-2">
-                        <div className={`flex h-6 w-6 items-center justify-center rounded-full text-[9px] font-bold ring-2 ${color.bg} ${color.text} ${color.ring}`}>
-                          {getSpeakerInitials(section.speaker)}
-                        </div>
-                        <InlineEdit
-                          value={section.speaker ?? ""}
-                          onSave={(v) => saveField(section.id, "speaker", v)}
-                          onEditStart={pausePlayback}
-                          className="text-xs font-semibold text-zinc-900 dark:text-zinc-100"
-                        />
-                      </div>
-
-                      <div className="flex items-center gap-1.5">
-                        <span className="inline-flex items-center gap-1 rounded-lg bg-zinc-100 px-2.5 py-1 text-xs font-mono text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 text-zinc-400">
-                            <path fillRule="evenodd" d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z" clipRule="evenodd" />
-                          </svg>
-                          {formatTimestamp(section.begin_timestamp)} → {formatTimestamp(section.end_timestamp)}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* transcript text */}
-                    <div className="mt-2.5">
-                      <InlineEdit
-                        value={section.edited_text ?? section.original_text ?? ""}
-                        onSave={(v) => saveField(section.id, "edited_text", v)}
-                        onEditStart={pausePlayback}
-                        multiline
-                        className="block w-full rounded-xl text-sm leading-snug"
-                        highlight={searchQuery}
-                        matchOffset={baseOffset}
-                        activeMatchIndex={searchMatchIndex}
-                      />
-                    </div>
-                  </div>
-
-                  {/* ── Right: icon strip with popouts ── */}
-                  <div className="relative flex-shrink-0 border-l border-zinc-100 dark:border-zinc-800 flex flex-col items-center gap-1 py-2 px-1.5">
-
-                    {/* Notes icon */}
-                    <button
-                      type="button"
-                      onClick={() => setSidebarPanel(sidebarPanel?.sectionId === section.id && sidebarPanel?.panel === "notes" ? null : { sectionId: section.id, panel: "notes" })}
-                      className={`cursor-pointer relative rounded-lg p-2 transition-all ${
-                        sidebarPanel?.sectionId === section.id && sidebarPanel?.panel === "notes"
-                          ? "bg-sky-100 text-sky-600 ring-2 ring-sky-300 dark:bg-sky-500/20 dark:text-sky-400 dark:ring-sky-500/40"
-                          : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-                      }`}
-                      title="Notes"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
-                        <path fillRule="evenodd" d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317 .713 2.435 0 3.277 0 4.26v4.48ZM5 6.5a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 6.5Zm.75 1.75a.75.75 0 0 0 0 1.5h2.5a.75.75 0 0 0 0-1.5h-2.5Z" clipRule="evenodd" />
-                      </svg>
-                      {comments.filter((c) => c.section_id === section.section_id).length > 0 && (
-                        <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-sky-500 px-1 text-[9px] font-bold text-white">
-                          {comments.filter((c) => c.section_id === section.section_id).length}
-                        </span>
-                      )}
-                    </button>
-
-                    {/* Tags icon */}
-                    <button
-                      type="button"
-                      onClick={() => setSidebarPanel(sidebarPanel?.sectionId === section.id && sidebarPanel?.panel === "tags" ? null : { sectionId: section.id, panel: "tags" })}
-                      className={`cursor-pointer relative rounded-lg p-2 transition-all ${
-                        sidebarPanel?.sectionId === section.id && sidebarPanel?.panel === "tags"
-                          ? "bg-orange-100 text-orange-600 ring-2 ring-orange-300 dark:bg-orange-500/20 dark:text-orange-400 dark:ring-orange-500/40"
-                          : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-                      }`}
-                      title="Tags"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
-                        <path fillRule="evenodd" d="M4.5 2A2.5 2.5 0 0 0 2 4.5v2.879a2.5 2.5 0 0 0 .732 1.767l4.5 4.5a2.5 2.5 0 0 0 3.536 0l2.878-2.878a2.5 2.5 0 0 0 0-3.536l-4.5-4.5A2.5 2.5 0 0 0 7.38 2H4.5ZM5 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
-                      </svg>
-                      {tags.length > 0 && (
-                        <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-orange-500 px-1 text-[9px] font-bold text-white">
-                          {tags.length}
-                        </span>
-                      )}
-                    </button>
-
-                    {/* Edits icon */}
-                    <button
-                      type="button"
-                      onClick={() => setDiffSectionId(section.id)}
-                      className={`cursor-pointer relative rounded-lg p-2 transition-all ${
-                        (section.edited_text ?? null) !== null && section.edited_text !== section.original_text
-                          ? "text-amber-600 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-500/20"
-                          : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-                      }`}
-                      title={(section.edited_text ?? null) !== null && section.edited_text !== section.original_text ? "Show edits" : "Compare"}
-                    >
-                      {/* Side-by-side diff / compare icon */}
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
-                        <path fillRule="evenodd" d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-9ZM7.25 3.5H3.5v9h3.75v-9Zm1.5 0v9H12.5v-9H8.75Z" clipRule="evenodd" />
-                      </svg>
-                      {(section.edited_text ?? null) !== null && section.edited_text !== section.original_text && (
-                        <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-white dark:ring-zinc-900" />
-                      )}
-                    </button>
-
-                    {/* ── Notes popout ── */}
-                    {sidebarPanel?.sectionId === section.id && sidebarPanel?.panel === "notes" && (
-                      <div className="absolute right-full top-0 z-40 mr-2 w-80 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
-                        <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
-                          <div className="flex items-center gap-1.5">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-sky-500">
-                              <path fillRule="evenodd" d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317 .713 2.435 0 3.277 0 4.26v4.48ZM5 6.5a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5A.75.75 0 0 1 5 6.5Zm.75 1.75a.75.75 0 0 0 0 1.5h2.5a.75.75 0 0 0 0-1.5h-2.5Z" clipRule="evenodd" />
-                            </svg>
-                            <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Notes</span>
-                            <span className="text-[10px] text-zinc-400">({comments.filter((c) => c.section_id === section.section_id).length})</span>
-                          </div>
-                          <button type="button" onClick={() => setSidebarPanel(null)} className="cursor-pointer rounded-lg p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300" aria-label="Close">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg>
-                          </button>
-                        </div>
-                        <div ref={notesListRef} className="max-h-[220px] overflow-y-auto">
-                          {(() => {
-                            const sectionNotes = comments.filter((c) => c.section_id === section.section_id);
-                            if (sectionNotes.length === 0) {
-                              return (
-                                <div className="flex flex-col items-center justify-center gap-1 py-6">
-                                  <p className="text-xs font-medium text-zinc-400">No notes yet</p>
-                                  <p className="text-[10px] text-zinc-300 dark:text-zinc-600">Add one below.</p>
-                                </div>
-                              );
-                            }
-                            return (
-                              <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                                {sectionNotes.map((c) => (
-                                  <div key={c.id} className="px-4 py-2.5">
-                                    <p className="text-[11px] leading-snug text-zinc-600 dark:text-zinc-400">{c.comment}</p>
-                                    <p className="mt-0.5 text-[10px] text-zinc-300 dark:text-zinc-600">{c.created_at ? new Date(c.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}</p>
-                                  </div>
-                                ))}
-                              </div>
-                            );
-                          })()}
-                        </div>
-                        <div className="border-t border-zinc-100 px-3 py-2.5 dark:border-zinc-800">
-                          <InlineCommentInput
-                            transcriptId={transcriptId}
-                            sectionId={section.section_id}
-                            onCommentAdded={() => fetchComments(true)}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── Tags popout ── */}
-                    {sidebarPanel?.sectionId === section.id && sidebarPanel?.panel === "tags" && (
-                      <div className="absolute right-full top-0 z-40 mr-2 w-72 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
-                        <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
-                          <div className="flex items-center gap-1.5">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-orange-500">
-                              <path fillRule="evenodd" d="M4.5 2A2.5 2.5 0 0 0 2 4.5v2.879a2.5 2.5 0 0 0 .732 1.767l4.5 4.5a2.5 2.5 0 0 0 3.536 0l2.878-2.878a2.5 2.5 0 0 0 0-3.536l-4.5-4.5A2.5 2.5 0 0 0 7.38 2H4.5ZM5 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
-                            </svg>
-                            <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Tags</span>
-                          </div>
-                          <button type="button" onClick={() => setSidebarPanel(null)} className="cursor-pointer rounded-lg p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300" aria-label="Close">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg>
-                          </button>
-                        </div>
-                        <div className="p-4">
-                          <TagEditor
-                            tags={tags}
-                            onAdd={(tag) => handleAddTag(section.id, tags, tag)}
-                            onRemove={(tag) => handleRemoveTag(section.id, tags, tag)}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Spacer so the last sections can still scroll to the top when active */}
-        {filteredSections.length > 0 && <div className="h-[60vh]" aria-hidden="true" />}
+      {/* ── Top row: Todo + Threads ── */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <TodoList transcriptId={transcriptId} onActivityChange={refreshActivity} />
+        <ThreadList transcriptId={transcriptId} onActivityChange={refreshActivity} />
       </div>
 
-      {/* ── Diff modal ── */}
-      {diffSectionId !== null && (() => {
-        const sec = sections.find((s) => s.id === diffSectionId);
-        if (!sec) return null;
-        return <DiffModal section={sec} onClose={() => setDiffSectionId(null)} onSave={(v) => saveField(sec.id, "edited_text", v)} />;
-      })()}
+      {/* ── Bottom row: Recent Comments + Recent Activity ── */}
+      <div className="grid gap-6 lg:grid-cols-2">
+
+      {/* ── Recent Comments ── */}
+      <div className="rounded-xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
+          <div className="flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-zinc-50">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 text-sky-500">
+                <path fillRule="evenodd" d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317 .713 2.435 0 3.277 0 4.26v4.48Z" clipRule="evenodd" />
+              </svg>
+              Recent Comments
+              {recent_comments.length > 0 && (
+                <span className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-sky-100 px-1.5 text-[10px] font-bold tabular-nums text-sky-600 dark:bg-sky-500/15 dark:text-sky-400">
+                  {recent_comments.length}
+                </span>
+              )}
+            </h2>
+            <div className="relative">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-sky-400 dark:text-sky-500"><path fillRule="evenodd" d="M9.965 11.026a5 5 0 1 1 1.06-1.06l2.755 2.754a.75.75 0 1 1-1.06 1.06l-2.755-2.754ZM10.5 7a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z" clipRule="evenodd" /></svg>
+              <input
+                type="text"
+                value={commentsSearch}
+                onChange={(e) => setCommentsSearch(e.target.value)}
+                placeholder="Search comments…"
+                className="w-32 rounded-full border border-sky-200/60 bg-sky-50/50 py-1 pl-7 pr-2.5 text-[11px] text-sky-700 placeholder:text-sky-300 transition focus:border-sky-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-sky-500/20 dark:bg-sky-500/5 dark:text-sky-300 dark:placeholder:text-sky-500/50 dark:focus:border-sky-500/40 dark:focus:bg-zinc-900 dark:focus:ring-sky-500/10"
+              />
+            </div>
+          </div>
+        </div>
+        <div className="max-h-64 overflow-y-auto divide-y divide-zinc-50 dark:divide-zinc-800/50">
+          {recent_comments.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-8 px-5">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-50 dark:bg-sky-500/10 mb-2">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-5 w-5 text-sky-400">
+                  <path fillRule="evenodd" d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317 .713 2.435 0 3.277 0 4.26v4.48Z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">No comments yet</p>
+              <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Comments from the editor will appear here</p>
+            </div>
+          )}
+          {recent_comments.filter((c) => {
+            if (!commentsSearch) return true;
+            const q = commentsSearch.toLowerCase();
+            return c.comment.toLowerCase().includes(q)
+              || (c.user_display_name ?? "").toLowerCase().includes(q);
+          }).map((c) => (
+            <div key={c.id} className="flex items-start gap-3 px-5 py-3 transition-colors hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30">
+              <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-100 to-indigo-100 text-[9px] font-bold text-sky-700 ring-1 ring-sky-200/60 dark:from-sky-500/20 dark:to-indigo-500/20 dark:text-sky-300 dark:ring-sky-500/30">
+                {c.user_display_name ? getSpeakerInitials(c.user_display_name) : "?"}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 truncate">{c.user_display_name ?? "Unknown"}</span>
+                  <span className="flex-shrink-0 inline-flex items-center rounded-full bg-sky-50 px-1.5 py-px text-[9px] font-semibold tabular-nums text-sky-600 ring-1 ring-sky-200/60 dark:bg-sky-500/10 dark:text-sky-400 dark:ring-sky-500/20">§{c.section_id}</span>
+                  <span className="flex-shrink-0 text-[10px] text-zinc-400">{relativeTime(c.created_at)}</span>
+                </div>
+                <p className="mt-0.5 text-sm text-zinc-600 dark:text-zinc-400 line-clamp-2 break-words"><MentionText text={c.comment} highlight={commentsSearch} /></p>
+              </div>
+            </div>
+          ))}
+          {recent_comments.length > 0 && recent_comments.filter((c) => {
+            if (!commentsSearch) return true;
+            const q = commentsSearch.toLowerCase();
+            return c.comment.toLowerCase().includes(q)
+              || (c.user_display_name ?? "").toLowerCase().includes(q);
+          }).length === 0 && (
+            <div className="flex flex-col items-center justify-center py-6 px-5">
+              <p className="text-xs text-zinc-400">No comments match &ldquo;{commentsSearch}&rdquo;</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+        {/* Recent Activity */}
+        <div className="rounded-xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-zinc-50">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 text-orange-500">
+                  <path fillRule="evenodd" d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z" clipRule="evenodd" />
+                </svg>
+                Recent Activity
+              </h2>
+              <div className="relative">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-orange-400 dark:text-orange-500"><path fillRule="evenodd" d="M9.965 11.026a5 5 0 1 1 1.06-1.06l2.755 2.754a.75.75 0 1 1-1.06 1.06l-2.755-2.754ZM10.5 7a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z" clipRule="evenodd" /></svg>
+                <input
+                  type="text"
+                  value={activitySearch}
+                  onChange={(e) => setActivitySearch(e.target.value)}
+                  placeholder="Search activity…"
+                  className="w-32 rounded-full border border-orange-200/60 bg-orange-50/50 py-1 pl-7 pr-2.5 text-[11px] text-orange-700 placeholder:text-orange-300 transition focus:border-orange-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-orange-100 dark:border-orange-500/20 dark:bg-orange-500/5 dark:text-orange-300 dark:placeholder:text-orange-500/50 dark:focus:border-orange-500/40 dark:focus:bg-zinc-900 dark:focus:ring-orange-500/10"
+                />
+              </div>
+            </div>
+          </div>
+          <div className="max-h-64 overflow-y-auto divide-y divide-zinc-50 dark:divide-zinc-800/50">
+            {recent_activity.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-8 px-5">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-50 dark:bg-orange-500/10 mb-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-5 w-5 text-orange-400">
+                    <path fillRule="evenodd" d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">No activity yet</p>
+                <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Actions will appear here as they happen</p>
+              </div>
+            )}
+            {(() => {
+              const cleanSummary = (raw: string | null) =>
+                (raw ?? "").replace(/^(?:Edited text in|Commented on|Added comment on|Deleted) section #\d+[:\s]*/i, "").replace(/^"|"$/g, "");
+
+              const filteredActivity = recent_activity.filter((a) => {
+                if (!activitySearch) return true;
+                const q = activitySearch.toLowerCase();
+                const meta = ACTION_LABELS[a.action];
+                return (meta?.label ?? a.action).toLowerCase().includes(q)
+                  || cleanSummary(a.summary).toLowerCase().includes(q)
+                  || (a.user_display_name ?? "").toLowerCase().includes(q);
+              });
+
+              if (recent_activity.length > 0 && filteredActivity.length === 0) {
+                return (
+                  <div className="flex flex-col items-center justify-center py-6 px-5">
+                    <p className="text-xs text-zinc-400">No activity matches &ldquo;{activitySearch}&rdquo;</p>
+                  </div>
+                );
+              }
+
+              return filteredActivity.map((a) => {
+                const meta = ACTION_LABELS[a.action] ?? { label: a.action, color: "text-zinc-500" };
+                const cleaned = cleanSummary(a.summary);
+                return (
+                  <div key={a.id} className="flex items-start gap-3 px-5 py-3 transition-colors hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30">
+                    <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800">
+                      <span className="h-2 w-2 rounded-full bg-orange-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="flex items-center gap-1.5 text-sm text-zinc-700 dark:text-zinc-300">
+                        <span className={`font-semibold ${meta.color}`}>{meta.label}</span>
+                        {a.section_id != null && <span className="inline-flex items-center rounded-full bg-orange-50 px-1.5 py-px text-[9px] font-semibold tabular-nums text-orange-600 ring-1 ring-orange-200/60 dark:bg-orange-500/10 dark:text-orange-400 dark:ring-orange-500/20">§{a.section_id}</span>}
+                      </p>
+                      {cleaned && <p className="mt-0.5 text-xs text-zinc-400 line-clamp-1 break-words"><MentionText text={cleaned} highlight={activitySearch} /></p>}
+                      <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-400">
+                        {a.user_display_name && <span className="truncate">{a.user_display_name}</span>}
+                        <span className="flex-shrink-0">{relativeTime(a.created_at)}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        </div>
+
+      </div>{/* end bottom row grid */}
     </section>
   );
 }

@@ -1,0 +1,601 @@
+﻿"use client";
+
+import { useEffect, useState, useRef, useCallback } from "react";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+
+/* ── Types ── */
+
+interface OverviewSpeaker {
+  id: number;
+  display_name: string | null;
+  speaker_label: string | null;
+  section_count: number;
+}
+
+interface ActivityEntry {
+  id: number;
+  action: string;
+  section_id: number | null;
+  summary: string | null;
+  user_display_name: string | null;
+  created_at: string | null;
+}
+
+interface RecentComment {
+  id: number;
+  section_id: number;
+  comment: string;
+  user_display_name: string | null;
+  created_at: string | null;
+}
+
+interface TodoItem {
+  id: number;
+  transcription_id: number;
+  title: string;
+  is_completed: number;
+  sort_order: number;
+  created_by: number | null;
+  created_at: string | null;
+  completed_at: string | null;
+}
+
+interface TranscriptOverview {
+  id: number;
+  title: string | null;
+  description: string | null;
+  status: string | null;
+  lesson_subject: string | null;
+  lesson_number: string | null;
+  tags: string[];
+  created: string | null;
+  modified: string | null;
+  total_sections: number;
+  edited_sections: number;
+  total_speakers: number;
+  total_comments: number;
+  total_duration: string | null;
+  speakers: OverviewSpeaker[];
+  recent_activity: ActivityEntry[];
+  recent_comments: RecentComment[];
+}
+
+/* ── Helpers ── */
+
+function getSpeakerInitials(speaker: string | null) {
+  if (!speaker) return "?";
+  return speaker.split(/[\s_-]+/).map((w) => w[0]).join("").toUpperCase().slice(0, 2);
+}
+
+const ACTION_LABELS: Record<string, { label: string; color: string }> = {
+  section_edited: { label: "Edited section", color: "text-amber-600 dark:text-amber-400" },
+  section_added: { label: "Added section", color: "text-emerald-600 dark:text-emerald-400" },
+  section_deleted: { label: "Deleted section", color: "text-red-500 dark:text-red-400" },
+  comment_added: { label: "Added comment", color: "text-sky-600 dark:text-sky-400" },
+};
+
+function relativeTime(dateStr: string | null): string {
+  if (!dateStr) return "";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+/* ================================================================== */
+/*  Todo List component                                                */
+/* ================================================================== */
+
+function TodoList({ transcriptId }: { transcriptId: string }) {
+  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newTitle, setNewTitle] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [search, setSearch] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const editRef = useRef<HTMLInputElement>(null);
+
+  const fetchTodos = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/transcripts/${transcriptId}/todos`);
+      if (!res.ok) return;
+      setTodos(await res.json());
+    } catch { /* ignore */ } finally {
+      setLoading(false);
+    }
+  }, [transcriptId]);
+
+  useEffect(() => { fetchTodos(); }, [fetchTodos]);
+  useEffect(() => { if (editingId && editRef.current) editRef.current.focus(); }, [editingId]);
+
+  const addTodo = async () => {
+    if (!newTitle.trim()) return;
+    setAdding(true);
+    try {
+      const res = await fetch(`/api/transcripts/${transcriptId}/todos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: newTitle.trim() }),
+      });
+      if (res.ok) {
+        setTodos(await res.json());
+        setNewTitle("");
+        inputRef.current?.focus();
+      }
+    } catch { /* ignore */ } finally { setAdding(false); }
+  };
+
+  const toggleTodo = async (todo: TodoItem) => {
+    const next = todo.is_completed === 1 ? 0 : 1;
+    setTodos((prev) => prev.map((t) => t.id === todo.id ? { ...t, is_completed: next } : t));
+    try {
+      const res = await fetch(`/api/transcripts/${transcriptId}/todos/${todo.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_completed: next }),
+      });
+      if (res.ok) setTodos(await res.json());
+    } catch { fetchTodos(); }
+  };
+
+  const saveEdit = async (todoId: number) => {
+    if (!editingTitle.trim()) { setEditingId(null); return; }
+    try {
+      const res = await fetch(`/api/transcripts/${transcriptId}/todos/${todoId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: editingTitle.trim() }),
+      });
+      if (res.ok) setTodos(await res.json());
+    } catch { /* ignore */ } finally { setEditingId(null); }
+  };
+
+  const deleteTodo = async (todoId: number) => {
+    setTodos((prev) => prev.filter((t) => t.id !== todoId));
+    try {
+      const res = await fetch(`/api/transcripts/${transcriptId}/todos/${todoId}`, { method: "DELETE" });
+      if (res.ok) setTodos(await res.json());
+    } catch { fetchTodos(); }
+  };
+
+  const openCount = todos.filter((t) => t.is_completed === 0).length;
+  const doneCount = todos.filter((t) => t.is_completed === 1).length;
+  const progress = todos.length > 0 ? Math.round((doneCount / todos.length) * 100) : 0;
+
+  return (
+    <div className="rounded-xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      {/* Header */}
+      <div className="border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
+        <div className="flex items-center justify-between">
+          <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-zinc-50">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 text-indigo-500">
+              <path fillRule="evenodd" d="M11.986 3H12a2 2 0 0 1 2 2v6a2 2 0 0 1-1.5 1.937V7A2.5 2.5 0 0 0 10 4.5H4.063A2 2 0 0 1 6 3h.014A2.25 2.25 0 0 1 8.25 1h-.5a2.25 2.25 0 0 1 2.236 2ZM10.5 4v-.75a.75.75 0 0 0-.75-.75h-3.5a.75.75 0 0 0-.75.75V4h5Z" clipRule="evenodd" />
+              <path fillRule="evenodd" d="M2 7a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7Zm6.585 1.08a.75.75 0 0 1 .336 1.005l-1.75 3.5a.75.75 0 0 1-1.16.234l-1.25-1.25a.75.75 0 0 1 1.06-1.06l.557.556 1.202-2.649a.75.75 0 0 1 1.005-.337Z" clipRule="evenodd" />
+            </svg>
+            To-Do
+          </h2>
+          <div className="flex items-center gap-2">
+            {todos.length > 0 && (
+              <>
+                <span className="text-[10px] font-semibold tabular-nums text-zinc-400">
+                  {doneCount}/{todos.length}
+                </span>
+                <div className="h-1.5 w-16 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-500"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </>
+            )}
+            <div className="relative">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-zinc-400"><path fillRule="evenodd" d="M9.965 11.026a5 5 0 1 1 1.06-1.06l2.755 2.754a.75.75 0 1 1-1.06 1.06l-2.755-2.754ZM10.5 7a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z" clipRule="evenodd" /></svg>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search…"
+                className="w-28 rounded-md border border-zinc-200 bg-zinc-50 py-1 pl-7 pr-2 text-[11px] placeholder:text-zinc-400 transition focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-200 dark:border-zinc-700 dark:bg-zinc-800 dark:placeholder:text-zinc-500 dark:focus:border-indigo-500/50 dark:focus:bg-zinc-900"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* List */}
+      <div className="max-h-64 overflow-y-auto divide-y divide-zinc-50 dark:divide-zinc-800/50">
+        {loading && (
+          <div className="flex items-center justify-center py-6">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
+          </div>
+        )}
+
+        {!loading && todos.length === 0 && !newTitle && (
+          <p className="px-5 py-6 text-center text-xs text-zinc-400">No tasks yet — add one below.</p>
+        )}
+
+        {todos.filter((t) => !search || t.title.toLowerCase().includes(search.toLowerCase())).map((todo) => (
+          <div
+            key={todo.id}
+            className={`group flex items-start gap-3 px-5 py-2.5 transition-colors ${
+              todo.is_completed ? "bg-zinc-50/50 dark:bg-zinc-800/20" : ""
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => toggleTodo(todo)}
+              className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border-2 transition-all cursor-pointer ${
+                todo.is_completed
+                  ? "border-indigo-500 bg-indigo-500 text-white dark:border-indigo-400 dark:bg-indigo-500"
+                  : "border-zinc-300 bg-white hover:border-indigo-400 dark:border-zinc-600 dark:bg-zinc-900 dark:hover:border-indigo-500"
+              }`}
+              aria-label={todo.is_completed ? "Mark incomplete" : "Mark complete"}
+            >
+              {todo.is_completed === 1 && (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
+                  <path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
+                </svg>
+              )}
+            </button>
+
+            <div className="min-w-0 flex-1">
+              {editingId === todo.id ? (
+                <input
+                  ref={editRef}
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onBlur={() => saveEdit(todo.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveEdit(todo.id);
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
+                  className="w-full rounded-lg border border-indigo-300 bg-white px-2 py-0.5 text-sm text-zinc-900 outline-none ring-2 ring-indigo-200 dark:border-indigo-500/50 dark:bg-zinc-900 dark:text-zinc-100 dark:ring-indigo-500/20"
+                />
+              ) : (
+                <p
+                  onClick={() => { setEditingId(todo.id); setEditingTitle(todo.title); }}
+                  className={`cursor-pointer text-sm leading-snug transition ${
+                    todo.is_completed
+                      ? "text-zinc-400 line-through decoration-zinc-300 dark:text-zinc-500 dark:decoration-zinc-600"
+                      : "text-zinc-700 dark:text-zinc-300"
+                  }`}
+                >
+                  {todo.title}
+                </p>
+              )}
+              {todo.completed_at && (
+                <p className="mt-0.5 text-[10px] text-zinc-400">Completed {relativeTime(todo.completed_at)}</p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => deleteTodo(todo.id)}
+              className="cursor-pointer mt-0.5 flex-shrink-0 rounded-lg p-1 text-zinc-300 opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-500 dark:text-zinc-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+              aria-label="Delete todo"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+                <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+              </svg>
+            </button>
+          </div>
+        ))}
+
+      </div>
+
+      {/* Add input */}
+      <div className="border-t border-zinc-100 px-5 py-3 dark:border-zinc-800">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400">
+              <path d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z" />
+            </svg>
+            <input
+              ref={inputRef}
+              type="text"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") addTodo(); }}
+              placeholder="Add a task…"
+              className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-1.5 pl-8 pr-3 text-sm placeholder:text-zinc-400 transition focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-zinc-700 dark:bg-zinc-800 dark:placeholder:text-zinc-500 dark:focus:border-indigo-500/50 dark:focus:bg-zinc-900 dark:focus:ring-indigo-500/20"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={addTodo}
+            disabled={!newTitle.trim() || adding}
+            className="cursor-pointer flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-sm shadow-indigo-500/20 transition hover:shadow-indigo-500/40 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Add task"
+          >
+            {adding ? (
+              <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+                <path d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z" />
+              </svg>
+            )}
+          </button>
+        </div>
+        {openCount > 0 && doneCount > 0 && (
+          <p className="mt-2 text-[10px] text-zinc-400">{openCount} remaining · {doneCount} completed</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
+/*  Overview Page                                                      */
+/* ================================================================== */
+
+export default function TranscriptOverviewPage() {
+  const params = useParams<{ transcriptId: string }>();
+  const transcriptId = params.transcriptId;
+
+  const [data, setData] = useState<TranscriptOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [activitySearch, setActivitySearch] = useState("");
+  const [commentsSearch, setCommentsSearch] = useState("");
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/transcripts/${transcriptId}/overview`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Failed (${r.status})`);
+        return r.json();
+      })
+      .then((d) => setData(d))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [transcriptId]);
+
+  if (loading) {
+    return (
+      <section className="flex flex-col items-center justify-center gap-4 py-24">
+        <div className="relative h-12 w-12">
+          <div className="absolute inset-0 animate-spin rounded-full border-4 border-orange-200 border-t-orange-500 dark:border-orange-800 dark:border-t-orange-400" />
+        </div>
+        <p className="text-sm font-medium text-zinc-400 animate-pulse">Loading overview…</p>
+      </section>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <section className="flex flex-col items-center justify-center gap-6 py-24">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-8 w-8 text-red-500">
+            <path fillRule="evenodd" d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003ZM12 8.25a.75.75 0 0 1 .75.75v3.75a.75.75 0 0 1-1.5 0V9a.75.75 0 0 1 .75-.75Zm0 8.25a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z" clipRule="evenodd" />
+          </svg>
+        </div>
+        <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{error ?? "Not found"}</p>
+      </section>
+    );
+  }
+
+  const { speakers, recent_activity, recent_comments } = data;
+
+  const detailStats = [
+    { label: "Sections", value: data.total_sections, icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-orange-500"><path d="M2 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm4.5 2a.75.75 0 0 0 0 1.5h3a.75.75 0 0 0 0-1.5h-3Zm0 3a.75.75 0 0 0 0 1.5h3a.75.75 0 0 0 0-1.5h-3Z" /></svg>
+    )},
+    { label: "Edited", value: data.edited_sections, icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-amber-500"><path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.262a1.75 1.75 0 0 0 0-2.474Z" /><path d="M4.75 3.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h6.5c.69 0 1.25-.56 1.25-1.25V9A.75.75 0 0 1 14 9v2.25A2.75 2.75 0 0 1 11.25 14h-6.5A2.75 2.75 0 0 1 2 11.25v-6.5A2.75 2.75 0 0 1 4.75 2H7a.75.75 0 0 1 0 1.5H4.75Z" /></svg>
+    )},
+    { label: "Comments", value: data.total_comments, icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-sky-500"><path fillRule="evenodd" d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317 .713 2.435 0 3.277 0 4.26v4.48Z" clipRule="evenodd" /></svg>
+    )},
+    { label: "Speakers", value: speakers.length, icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-violet-500"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12.735 14c.618 0 1.093-.561.872-1.139a6.002 6.002 0 0 0-11.215 0c-.22.578.254 1.139.872 1.139h9.47Z" /></svg>
+    )},
+    { label: "Duration", value: data.total_duration ?? "—", icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 text-emerald-500"><path fillRule="evenodd" d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z" clipRule="evenodd" /></svg>
+    )},
+  ];
+
+  return (
+    <section className="space-y-6">
+      {/* ── Transcript Details (header + stats + speakers) ── */}
+      <div className="relative rounded-2xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-orange-400 via-amber-400 to-orange-500" />
+        <div className="px-6 pt-6 pb-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-amber-500 shadow-md shadow-orange-500/20">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5 text-white">
+                    <path fillRule="evenodd" d="M4.125 3C3.089 3 2.25 3.84 2.25 4.875V18a3 3 0 0 0 3 3h15a3 3 0 0 1-3-3V4.875C17.25 3.839 16.41 3 15.375 3H4.125ZM12 9.75a.75.75 0 0 0 0 1.5h1.5a.75.75 0 0 0 0-1.5H12Zm-.75-2.25a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5H12a.75.75 0 0 1-.75-.75ZM6 12.75a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5H6Zm-.75 3.75a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75ZM6 6.75a.75.75 0 0 0-.75.75v3c0 .414.336.75.75.75h3a.75.75 0 0 0 .75-.75v-3A.75.75 0 0 0 9 6.75H6Z" clipRule="evenodd" />
+                    <path d="M18.75 6.75h1.875c.621 0 1.125.504 1.125 1.125V18a1.5 1.5 0 0 1-3 0V6.75Z" />
+                  </svg>
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+                    {data.title ?? `Transcript #${transcriptId}`}
+                  </h1>
+                  {data.description && (
+                    <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">{data.description}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {data.status && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    {data.status}
+                  </span>
+                )}
+                {data.lesson_subject && (
+                  <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-[11px] font-semibold text-violet-700 dark:bg-violet-500/15 dark:text-violet-400">
+                    {data.lesson_subject}
+                  </span>
+                )}
+                {data.lesson_number && (
+                  <span className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                    Lesson {data.lesson_number}
+                  </span>
+                )}
+                {data.tags.map((t) => (
+                  <span key={t} className="rounded-full bg-orange-100 px-2.5 py-0.5 text-[11px] font-semibold text-orange-700 dark:bg-orange-500/15 dark:text-orange-400">
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <Link
+              href={`/transcriptions/${transcriptId}/editor`}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-orange-500/25 transition hover:shadow-orange-500/40 hover:brightness-110 active:scale-[0.98]"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
+                <path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.262a1.75 1.75 0 0 0 0-2.474Z" />
+                <path d="M4.75 3.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h6.5c.69 0 1.25-.56 1.25-1.25V9A.75.75 0 0 1 14 9v2.25A2.75 2.75 0 0 1 11.25 14h-6.5A2.75 2.75 0 0 1 2 11.25v-6.5A2.75 2.75 0 0 1 4.75 2H7a.75.75 0 0 1 0 1.5H4.75Z" />
+              </svg>
+              Open Editor
+            </Link>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="border-t border-zinc-100 dark:border-zinc-800">
+          <div className="grid grid-cols-5">
+            {detailStats.map((s, i) => (
+              <div
+                key={s.label}
+                className={`flex flex-col items-center justify-center gap-0.5 py-3 ${
+                  i < detailStats.length - 1 ? "border-r border-zinc-100 dark:border-zinc-800" : ""
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  {s.icon}
+                  <span className="text-lg font-bold tabular-nums text-zinc-900 dark:text-zinc-50">{s.value}</span>
+                </div>
+                <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">{s.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Two-column: Todo + Activity ── */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <TodoList transcriptId={transcriptId} />
+
+        {/* Recent Activity */}
+        <div className="rounded-xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-zinc-50">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 text-orange-500">
+                  <path fillRule="evenodd" d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z" clipRule="evenodd" />
+                </svg>
+                Recent Activity
+              </h2>
+              <div className="relative">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-zinc-400"><path fillRule="evenodd" d="M9.965 11.026a5 5 0 1 1 1.06-1.06l2.755 2.754a.75.75 0 1 1-1.06 1.06l-2.755-2.754ZM10.5 7a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z" clipRule="evenodd" /></svg>
+                <input
+                  type="text"
+                  value={activitySearch}
+                  onChange={(e) => setActivitySearch(e.target.value)}
+                  placeholder="Search…"
+                  className="w-28 rounded-md border border-zinc-200 bg-zinc-50 py-1 pl-7 pr-2 text-[11px] placeholder:text-zinc-400 transition focus:border-orange-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-orange-200 dark:border-zinc-700 dark:bg-zinc-800 dark:placeholder:text-zinc-500 dark:focus:border-orange-500/50 dark:focus:bg-zinc-900"
+                />
+              </div>
+            </div>
+          </div>
+          <div className="max-h-64 overflow-y-auto divide-y divide-zinc-50 dark:divide-zinc-800/50">
+            {recent_activity.length === 0 && (
+              <p className="px-5 py-6 text-center text-xs text-zinc-400">No activity yet.</p>
+            )}
+            {recent_activity.filter((a) => {
+              if (!activitySearch) return true;
+              const q = activitySearch.toLowerCase();
+              const meta = ACTION_LABELS[a.action];
+              return (meta?.label ?? a.action).toLowerCase().includes(q)
+                || (a.summary ?? "").toLowerCase().includes(q)
+                || (a.user_display_name ?? "").toLowerCase().includes(q);
+            }).map((a) => {
+              const meta = ACTION_LABELS[a.action] ?? { label: a.action, color: "text-zinc-500" };
+              return (
+                <div key={a.id} className="flex items-start gap-3 px-5 py-3">
+                  <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800">
+                    <span className="h-2 w-2 rounded-full bg-orange-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-zinc-700 dark:text-zinc-300">
+                      <span className={`font-semibold ${meta.color}`}>{meta.label}</span>
+                      {a.section_id != null && <span className="text-zinc-400"> · §{a.section_id}</span>}
+                    </p>
+                    {a.summary && <p className="mt-0.5 text-xs text-zinc-400 line-clamp-1">{a.summary}</p>}
+                    <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-400">
+                      {a.user_display_name && <span>{a.user_display_name}</span>}
+                      <span>{relativeTime(a.created_at)}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+          </div>
+        </div>
+      </div>
+
+      {/* ── Recent Comments ── */}
+      {recent_comments.length > 0 && (
+        <div className="rounded-xl border border-zinc-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-zinc-50">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 text-sky-500">
+                  <path fillRule="evenodd" d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317 .713 2.435 0 3.277 0 4.26v4.48Z" clipRule="evenodd" />
+                </svg>
+                Recent Comments
+              </h2>
+              <div className="relative">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-zinc-400"><path fillRule="evenodd" d="M9.965 11.026a5 5 0 1 1 1.06-1.06l2.755 2.754a.75.75 0 1 1-1.06 1.06l-2.755-2.754ZM10.5 7a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0Z" clipRule="evenodd" /></svg>
+                <input
+                  type="text"
+                  value={commentsSearch}
+                  onChange={(e) => setCommentsSearch(e.target.value)}
+                  placeholder="Search…"
+                  className="w-28 rounded-md border border-zinc-200 bg-zinc-50 py-1 pl-7 pr-2 text-[11px] placeholder:text-zinc-400 transition focus:border-sky-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-200 dark:border-zinc-700 dark:bg-zinc-800 dark:placeholder:text-zinc-500 dark:focus:border-sky-500/50 dark:focus:bg-zinc-900"
+                />
+              </div>
+            </div>
+          </div>
+          <div className="max-h-64 overflow-y-auto divide-y divide-zinc-50 dark:divide-zinc-800/50">
+            {recent_comments.filter((c) => {
+              if (!commentsSearch) return true;
+              const q = commentsSearch.toLowerCase();
+              return c.comment.toLowerCase().includes(q)
+                || (c.user_display_name ?? "").toLowerCase().includes(q);
+            }).map((c) => (
+              <div key={c.id} className="flex items-start gap-3 px-5 py-3">
+                <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-100 to-indigo-100 text-[9px] font-bold text-sky-700 ring-1 ring-sky-200/60 dark:from-sky-500/20 dark:to-indigo-500/20 dark:text-sky-300 dark:ring-sky-500/30">
+                  {c.user_display_name ? getSpeakerInitials(c.user_display_name) : "?"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{c.user_display_name ?? "Unknown"}</span>
+                    <span className="text-[10px] text-zinc-400">§{c.section_id}</span>
+                    <span className="text-[10px] text-zinc-400">{relativeTime(c.created_at)}</span>
+                  </div>
+                  <p className="mt-0.5 text-sm text-zinc-600 dark:text-zinc-400 line-clamp-2">{c.comment}</p>
+                </div>
+              </div>
+            ))}
+
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}

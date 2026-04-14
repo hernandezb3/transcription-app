@@ -9,6 +9,7 @@ class UsersT(Base):
     unique_id = Column(String(50), nullable=True)
     user_email = Column(String(215), nullable=True)
     user_name = Column(String(200), nullable=True)
+    password_hash = Column(String(255), nullable=True)
     first_name = Column(String(200), nullable=True)
     last_name = Column(String(100), nullable=True)
     display_name = Column(String(200), nullable=True)

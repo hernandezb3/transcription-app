@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from app.data_models.user import UserCreate, UserUpdate
+from app.auth.security import hash_password
 
 class UserMapper:
     @staticmethod
@@ -11,6 +12,11 @@ class UserMapper:
     def to_create_values(user: UserCreate, user_id: int = 1) -> dict:
         user_data = user.model_dump(exclude_unset=True)
         now = UserMapper._utc_now_naive()
+
+        # Hash the password and store it separately; never persist the plain-text field
+        plain_password = user_data.pop("password", None)
+        if plain_password:
+            user_data["password_hash"] = hash_password(plain_password)
 
         user_data.setdefault("created", now)
         user_data.setdefault("modified", now)

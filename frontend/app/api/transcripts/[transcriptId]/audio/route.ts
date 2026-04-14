@@ -1,9 +1,16 @@
 import { settings } from "@/lib/settings";
+import { getAuthToken } from "@/lib/api-client";
 import { NextResponse } from "next/server";
 
 type RouteContext = {
   params: Promise<{ transcriptId: string }>;
 };
+
+/** Build an auth header object if a token is available. */
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 /**
  * Proxy GET /api/transcripts/:id/audio → FastAPI backend.
@@ -25,6 +32,7 @@ export async function HEAD(_: Request, context: RouteContext) {
   try {
     const backendRes = await fetch(`${baseUrl}/transcripts/${transcriptId}/audio`, {
       method: "HEAD",
+      headers: await authHeaders(),
       cache: "no-store",
     });
     return new NextResponse(null, { status: backendRes.status });
@@ -47,6 +55,7 @@ export async function GET(_: Request, context: RouteContext) {
 
   try {
     const backendRes = await fetch(`${baseUrl}/transcripts/${transcriptId}/audio`, {
+      headers: await authHeaders(),
       cache: "no-store",
     });
 

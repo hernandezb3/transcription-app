@@ -1,7 +1,7 @@
 import sqlalchemy
 
 from app.infrastructure.databases.factory import DatabaseFactory
-from app.db_models.transcription.transcription import TranscriptDetailsT
+from app.db_models.transcription.transcription import TranscriptDetailsT, TranscriptSpeakersT
 
 class TranscriptRepository:
     def __init__(self):
@@ -12,13 +12,17 @@ class TranscriptRepository:
             TranscriptDetailsT.id,
             TranscriptDetailsT.transcription_id,
             TranscriptDetailsT.section_id,
-            TranscriptDetailsT.speaker,
+            TranscriptDetailsT.speaker_id,
+            TranscriptSpeakersT.display_name.label("speaker"),
             TranscriptDetailsT.begin_timestamp,
             TranscriptDetailsT.end_timestamp,
             TranscriptDetailsT.original_text,
             TranscriptDetailsT.edited_text,
             TranscriptDetailsT.tags,
             TranscriptDetailsT.is_active,
+        ).outerjoin(
+            TranscriptSpeakersT,
+            TranscriptDetailsT.speaker_id == TranscriptSpeakersT.id,
         ).where(TranscriptDetailsT.transcription_id == transcript_id)
         result = await self.database.aread(query)
         return result

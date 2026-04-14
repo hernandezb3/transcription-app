@@ -1,10 +1,14 @@
+"use client";
+
 import Link from "next/link";
+import { useAuth } from "@/lib/auth-context";
 
 type ModuleCard = {
   title: string;
   description: string;
   href: string;
   cta: string;
+  requiredPermission?: string;
 };
 
 type ModuleGroup = {
@@ -22,6 +26,7 @@ const sections: ModuleGroup[] = [
           "Browse participants, view their transcripts, and upload new recordings.",
         href: "/participants",
         cta: "Open Participants",
+        requiredPermission: "participants.read",
       },
     ],
   },
@@ -34,6 +39,7 @@ const sections: ModuleGroup[] = [
           "Create and manage lesson subjects available for transcript uploads.",
         href: "/metadata/lesson-subjects",
         cta: "Open Lesson Subjects",
+        requiredPermission: "settings.read",
       },
       {
         title: "Microphone Colors",
@@ -41,19 +47,38 @@ const sections: ModuleGroup[] = [
           "Create and manage the microphone color palette used across transcripts.",
         href: "/metadata",
         cta: "Open Microphone Colors",
+        requiredPermission: "settings.read",
       },
+    ],
+  },
+  {
+    heading: "Security",
+    cards: [
       {
-        title: "Users",
+        title: "Roles & Permissions",
         description:
-          "View and manage team members, usernames, and account status.",
-        href: "/users",
-        cta: "Open Users",
+          "Manage groups, assign roles, and configure permission policies.",
+        href: "/admin",
+        cta: "Open Roles & Permissions",
+        requiredPermission: "roles.read",
       },
     ],
   },
 ];
 
 export default function Home() {
+  const { hasPermission, permissions } = useAuth();
+
+  /* Filter sections to only show cards the user can access */
+  const visibleSections = sections
+    .map((section) => ({
+      ...section,
+      cards: section.cards.filter(
+        (card) => !card.requiredPermission || hasPermission(card.requiredPermission),
+      ),
+    }))
+    .filter((section) => section.cards.length > 0);
+
   return (
     <section className="space-y-8">
       {/* hero */}
@@ -65,7 +90,7 @@ export default function Home() {
       </div>
 
       {/* module groups */}
-      {sections.map((section) => (
+      {visibleSections.map((section) => (
         <div key={section.heading} className="space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
             {section.heading}

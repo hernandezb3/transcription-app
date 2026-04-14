@@ -7,6 +7,21 @@ from app.repositories.user.controller import UserRepository
 
 router = APIRouter(prefix="/users")
 
+
+@router.get("/search")
+async def search_users(
+    q: str = Query("", description="Search term for username or display name"),
+    limit: int = Query(10, ge=1, le=50),
+):
+    """Return users whose user_name or display_name match the query.
+    Used by the @mention autocomplete in the frontend.
+    """
+    repository = UserRepository()
+    result = await repository.search_users(query=q, limit=limit)
+    data = result.get("data", []) if isinstance(result, dict) else []
+    return data
+
+
 @router.post("/")
 async def create_user(user: UserCreate):
     result = await UserRepository().create_user(user)
@@ -18,6 +33,12 @@ async def get_user(user_id: int):
     result = await UserRepository().aget_user(user_id)
     data = result.get("data")
     return data
+
+@router.get("/{user_id}/permissions")
+async def get_user_permissions(user_id: int):
+    """Return every active permission code the user holds through their active roles."""
+    result = await UserRepository().get_user_permissions(user_id)
+    return result
 
 @router.put("/{user_id}")
 async def update_user(user: UserUpdate,user_id: int):
@@ -32,7 +53,7 @@ async def delete_user(user_id: int):
 @router.get("/")
 async def list_users(
     page: int = Query(default=1, ge=1),
-    limit: int = Query(default=10, ge=1, le=100),
+    limit: int = Query(default=10, ge=1, le=500),
 ):
     offset = (page - 1) * limit
 

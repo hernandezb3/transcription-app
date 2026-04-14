@@ -1,4 +1,5 @@
 import { settings } from "@/lib/settings";
+import { cookies } from "next/headers";
 
 export class ApiClientError extends Error {
   status: number;
@@ -7,6 +8,21 @@ export class ApiClientError extends Error {
     super(message);
     this.name = "ApiClientError";
     this.status = status;
+  }
+}
+
+/**
+ * Read the auth JWT from the incoming request cookie.
+ * This uses the Next.js `cookies()` API which is only available inside
+ * Route Handlers and Server Components — it will gracefully return
+ * undefined in any other context.
+ */
+export async function getAuthToken(): Promise<string | undefined> {
+  try {
+    const cookieStore = await cookies();
+    return cookieStore.get("auth_token")?.value;
+  } catch {
+    return undefined;
   }
 }
 
@@ -24,12 +40,24 @@ export class FastApiClient {
   async request<T>(path: string, init?: RequestInit): Promise<T> {
     const normalizedPath = path.startsWith("/") ? path : `/${path}`;
 
+    // Auto-attach the auth token from the incoming request cookie
+    // so every proxied call to FastAPI carries the JWT.
+    const authHeaders: Record<string, string> = {};
+    const token = await getAuthToken();
+    if (token) {
+      authHeaders["Authorization"] = `Bearer ${token}`;
+    }
+
     let response: Response;
 
     try {
       response = await fetch(`${this.baseUrl}${normalizedPath}`, {
         cache: "no-store",
         ...init,
+        headers: {
+          ...authHeaders,
+          ...(init?.headers ?? {}),
+        },
       });
     } catch {
       throw new ApiClientError("Could not reach FastAPI service", 502);

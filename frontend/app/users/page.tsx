@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import RequirePermission from "@/app/components/require-permission";
 
 type User = {
   id: number;
@@ -185,6 +186,7 @@ export default function UsersPage() {
   const canGoNext = currentPage < totalPages;
 
   return (
+    <RequirePermission permission="users.read">
     <section className="flex h-full min-h-0 flex-col space-y-4 overflow-hidden">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold">Users</h2>
@@ -540,5 +542,6 @@ export default function UsersPage() {
         </div>
       )}
     </section>
+    </RequirePermission>
   );
 }

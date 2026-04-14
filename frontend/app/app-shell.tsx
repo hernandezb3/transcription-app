@@ -2,15 +2,17 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { settings } from "@/lib/settings";
+import { useAuth } from "@/lib/auth-context";
+import NotificationPanel from "@/app/components/notification-panel";
 
 type AppShellProps = {
   children: React.ReactNode;
 };
 
-type NavLink = { label: string; href: string };
+type NavLink = { label: string; href: string; requiredPermission?: string };
 type NavGroup = { label: string; children: NavLink[] };
 type NavEntry = NavLink | NavGroup;
 
@@ -22,15 +24,20 @@ const navEntries: NavEntry[] = [
   {
     label: "Research",
     children: [
-      { label: "Participants", href: "/participants" },
+      { label: "Participants", href: "/participants", requiredPermission: "participants.read" },
     ],
   },
   {
     label: "Administration",
     children: [
-      { label: "Lesson Subjects", href: "/metadata/lesson-subjects" },
-      { label: "Microphone Colors", href: "/metadata" },
-      { label: "Users", href: "/users" },
+      { label: "Lesson Subjects", href: "/metadata/lesson-subjects", requiredPermission: "settings.read" },
+      { label: "Microphone Colors", href: "/metadata", requiredPermission: "settings.read" },
+    ],
+  },
+  {
+    label: "Security",
+    children: [
+      { label: "Roles & Permissions", href: "/admin", requiredPermission: "roles.read" },
     ],
   },
 ];
@@ -44,28 +51,32 @@ const appName = settings.app?.name ?? "Project Focus";
 const defaultPageTitle = settings.app?.defaultPageTitle ?? "Landing Page";
 
 export default function AppShell({ children }: AppShellProps) {
+  const { user, logout, isLoading, hasPermission } = useAuth();
+
+  /* ---- filter nav entries by the user's permissions ---- */
+  const filteredNavEntries = navEntries
+    .map((entry) => {
+      if (isGroup(entry)) {
+        const visibleChildren = entry.children.filter(
+          (child) => !child.requiredPermission || hasPermission(child.requiredPermission),
+        );
+        return visibleChildren.length > 0 ? { ...entry, children: visibleChildren } : null;
+      }
+      return !entry.requiredPermission || hasPermission(entry.requiredPermission) ? entry : null;
+    })
+    .filter(Boolean) as NavEntry[];
+  const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const pathname = usePathname();
-  /* ---- breadcrumb segments ---- */
-  const breadcrumbs: { label: string; href?: string }[] = (() => {
-    const direct = allNavLinks.find((item) => item.href === pathname);
-    if (direct) return [{ label: direct.label }];
 
-    if (pathname.startsWith("/transcriptions")) {
-      return [
-        { label: "Participants", href: "/participants" },
-        { label: "Audio" },
-      ];
-    }
-
-    return [{ label: defaultPageTitle }];
-  })();
+  /* ---- public routes that skip the shell ---- */
+  const isPublicRoute = pathname === "/login" || pathname === "/register";
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
-    for (const entry of navEntries) {
+    for (const entry of filteredNavEntries) {
       if (isGroup(entry)) {
         initial[entry.label] =
           entry.label === "Research" ||
@@ -76,6 +87,12 @@ export default function AppShell({ children }: AppShellProps) {
   });
   const toggleGroup = (label: string) =>
     setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
+
+  useEffect(() => {
+    if (!isLoading && !user && !isPublicRoute) {
+      router.replace("/login");
+    }
+  }, [isLoading, user, isPublicRoute, router]);
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -94,6 +111,52 @@ export default function AppShell({ children }: AppShellProps) {
       document.removeEventListener("mousedown", handleOutsideClick);
     };
   }, []);
+
+  // For /login and /register, render children without the shell
+  if (isPublicRoute) {
+    return <>{children}</>;
+  }
+
+  // While restoring session, show a loading indicator
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">
+        <p className="text-sm text-zinc-500">Loading…</p>
+      </div>
+    );
+  }
+
+  // Not logged in → don't render anything (redirect will kick in)
+  if (!user) {
+    return null;
+  }
+
+  /* ---- breadcrumb segments ---- */
+  const breadcrumbs: { label: string; href?: string }[] = (() => {
+    const direct = allNavLinks.find((item) => item.href === pathname);
+    if (direct) return [{ label: direct.label }];
+
+    if (pathname.startsWith("/transcriptions/")) {
+      const segments = pathname.split("/").filter(Boolean);
+      // segments: ["transcriptions", "<id>", "editor"?]
+      const transcriptId = segments[1];
+
+      if (segments.length >= 3 && segments[2] === "editor") {
+        return [
+          { label: "Participants", href: "/participants" },
+          { label: `Transcript #${transcriptId}`, href: `/transcriptions/${transcriptId}` },
+          { label: "Editor" },
+        ];
+      }
+
+      return [
+        { label: "Participants", href: "/participants" },
+        { label: `Transcript #${transcriptId}` },
+      ];
+    }
+
+    return [{ label: defaultPageTitle }];
+  })();
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
@@ -147,26 +210,7 @@ export default function AppShell({ children }: AppShellProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="cursor-pointer rounded-md p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-              aria-label="Notifications"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="h-5 w-5"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15 17h5l-1.4-1.4a2 2 0 0 1-.6-1.4V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5m6 0a3 3 0 1 1-6 0m6 0H9"
-                />
-              </svg>
-            </button>
+            <NotificationPanel />
 
             <div className="relative" ref={profileMenuRef}>
               <button
@@ -195,14 +239,24 @@ export default function AppShell({ children }: AppShellProps) {
               {isProfileOpen && (
                 <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-md border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
                   <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">
-                    {appName}
+                    {user.display_name || user.user_name}
                   </p>
-                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    Environment: {process.env.NEXT_PUBLIC_APP_ENV ?? "dev"}
-                  </p>
-                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    API: {settings.api?.baseUrl}
-                  </p>
+                  {user.user_email && (
+                    <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                      {user.user_email}
+                    </p>
+                  )}
+                  <hr className="my-2 border-zinc-200 dark:border-zinc-700" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      logout();
+                      router.replace("/login");
+                    }}
+                    className="w-full cursor-pointer rounded-md px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                  >
+                    Sign out
+                  </button>
                 </div>
               )}
             </div>
@@ -277,7 +331,7 @@ export default function AppShell({ children }: AppShellProps) {
               Home
             </Link>
 
-            {navEntries.map((entry) => {
+            {filteredNavEntries.map((entry) => {
               if (isGroup(entry)) {
                 const isOpen = !!openGroups[entry.label];
                 const toggle = () => toggleGroup(entry.label);

@@ -1,4 +1,5 @@
 import { settings } from "@/lib/settings";
+import { getAuthToken } from "@/lib/api-client";
 import { NextResponse } from "next/server";
 
 type RouteContext = {
@@ -7,8 +8,8 @@ type RouteContext = {
 
 /**
  * Proxy POST /api/transcripts/:id/upload-audio → FastAPI backend.
- * Streams the multipart/form-data body directly to the backend
- * so we don't have to parse/rebuild it in Next.js.
+ * Forwards the multipart/form-data body (audio_file + transcript_file)
+ * directly to the backend.
  */
 export async function POST(request: Request, context: RouteContext) {
   const { transcriptId } = await context.params;
@@ -37,9 +38,13 @@ export async function POST(request: Request, context: RouteContext) {
     const contentType = request.headers.get("content-type") ?? "";
     const bodyBuffer = await request.arrayBuffer();
 
+    const headers: Record<string, string> = { "Content-Type": contentType };
+    const token = await getAuthToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
     const backendRes = await fetch(backendUrl, {
       method: "POST",
-      headers: { "Content-Type": contentType },
+      headers,
       body: bodyBuffer,
     });
 
@@ -55,7 +60,7 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json(data, { status: 201 });
   } catch {
     return NextResponse.json(
-      { error: "Failed to upload audio file" },
+      { error: "Failed to upload files" },
       { status: 502 }
     );
   }
