@@ -43,7 +43,7 @@ apscheduler
 
 alembic
 
-psycopg[binary]
+psycopg[binary,pool]
 psycopg
 
 # nemo-toolkit[asr]
