@@ -236,7 +236,7 @@ export default function ParticipantsPage() {
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file && (file.type === "audio/mpeg" || file.name.toLowerCase().endsWith(".mp3"))) {
+    if (file && (file.type === "audio/mpeg" || file.type === "audio/wav" || file.name.toLowerCase().endsWith(".mp3") || file.name.toLowerCase().endsWith(".wav"))) {
       setAudioFile(file);
     }
   };
@@ -871,10 +871,10 @@ export default function ParticipantsPage() {
                         </svg>
                       </div>
                       <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Audio</p>
-                      <p className="mt-0.5 text-[10px] text-zinc-400">.mp3 · Drop or click</p>
+                      <p className="mt-0.5 text-[10px] text-zinc-400">.mp3 / .wav · Drop or click</p>
                     </>
                   )}
-                  <input ref={fileInputRef} type="file" accept=".mp3,audio/mpeg" onChange={onFileSelect} className="hidden" />
+                  <input ref={fileInputRef} type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" onChange={onFileSelect} className="hidden" />
                 </div>
 
                 {/* Transcript TXT */}
