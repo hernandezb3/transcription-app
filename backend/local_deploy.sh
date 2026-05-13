@@ -10,6 +10,7 @@ usage() {
 	echo
 	echo "Optional keys:"
 	echo "  app_environment (default: public)"
+	echo "  build_platform (example: linux/amd64)"
 	echo "  registry_password (if omitted, REGISTRY_PASSWORD env var is used, then prompt)"
 	echo
 	echo "Example:"
@@ -20,6 +21,7 @@ usage() {
 	echo "    -v build_number=42 \\"
 	echo "    -v build_id=1001 \\"
 	echo "    -v build_user=bryan \\"
+	echo "    -v build_platform=linux/amd64 \\"
 	echo "    -v registry_password=super-secret \\"
 	echo "    -v app_environment=public"
 }
@@ -31,6 +33,7 @@ BUILD_NUMBER=""
 BUILD_ID=""
 BUILD_USER=""
 APP_ENVIRONMENT="public"
+BUILD_PLATFORM=""
 REGISTRY_PASSWORD="${REGISTRY_PASSWORD:-}"
 
 set_var() {
@@ -66,6 +69,9 @@ set_var() {
 		;;
 	app_environment | environment)
 		APP_ENVIRONMENT="$value"
+		;;
+	build_platform | platform)
+		BUILD_PLATFORM="$value"
 		;;
 	*)
 		echo "Unknown variable key: $raw_key"
@@ -133,9 +139,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 IMAGE_TAG="${REGISTRY_URL}/transcription-registry/${IMAGE_NAME}:${APP_ENVIRONMENT}"
 
+BUILD_PLATFORM_ARGS=()
+if [ -n "${BUILD_PLATFORM}" ]; then
+	BUILD_PLATFORM_ARGS=(--platform "${BUILD_PLATFORM}")
+fi
+
 echo "${REGISTRY_PASSWORD}" | podman login -u "${REGISTRY_USERNAME}" --password-stdin "${REGISTRY_URL}"
 
 podman build \
+	"${BUILD_PLATFORM_ARGS[@]}" \
 	-f "${SCRIPT_DIR}/Dockerfile" \
 	--target prod \
 	-t "${IMAGE_TAG}" \
