@@ -137,7 +137,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-IMAGE_TAG="${REGISTRY_URL}/transcription-registry/${IMAGE_NAME}:${APP_ENVIRONMENT}"
+IMAGE_TAG="${REGISTRY_URL}/project-focus/${IMAGE_NAME}:api"
 
 BUILD_PLATFORM_ARGS=()
 if [ -n "${BUILD_PLATFORM}" ]; then
