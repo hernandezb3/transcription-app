@@ -1,0 +1,1 @@
+bash local_deploy.sh -v registry_url=registry.example.com -v username=my-user -v image_name=transcription-app -v build_number=42 -v build_id=1001 -v build_user=bryan -v registry_password=super-secret -v app_environment=public
