@@ -1,0 +1,21 @@
+name: Build and Push to ACR (API)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  BuildAndDeploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      IMAGE_NAME: transcription-api
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to ACR
+        run: |
+          echo ${{ secrets.Registry_Password }} | docker login -u ${{ secrets.Registry_Username }} --password-stdin ${{ secrets.Registry_URL }}
