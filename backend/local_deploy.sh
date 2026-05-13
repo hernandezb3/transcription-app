@@ -36,7 +36,8 @@ REGISTRY_PASSWORD="${REGISTRY_PASSWORD:-}"
 set_var() {
 	local raw_key="$1"
 	local value="$2"
-	local key="${raw_key,,}"
+	local key
+	key="$(printf '%s' "$raw_key" | tr '[:upper:]' '[:lower:]')"
 
 	key="${key//./_}"
 	key="${key//-/_}"
