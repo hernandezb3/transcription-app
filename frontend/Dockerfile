@@ -12,7 +12,7 @@ ENV BuildUser=${BuildUser}
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
+COPY frontend/package.json package-lock.json* ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --prefer-offline --no-audit
 
