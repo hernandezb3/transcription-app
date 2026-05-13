@@ -32,7 +32,9 @@ RUN apt-get -y update && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /code/app
-COPY app /code/app
+
+COPY backend/app /code/app
+
 RUN pip install --no-cache-dir --upgrade -r /code/app/requirements.txt
 
 EXPOSE 80
