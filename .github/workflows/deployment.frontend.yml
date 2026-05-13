@@ -1,0 +1,37 @@
+name: Build and Push to ACR (UI)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  BuildAndDeploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      IMAGE_NAME: transcription-ui
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # - name: Log in to ACR
+      #   run: |
+      #     echo ${{ secrets.Registry_Password }} | docker login -u ${{ secrets.Registry_Username }} --password-stdin ${{ secrets.Registry_URL }}
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -f frontend/Dockerfile \
+            --target prod \
+            -t "${{ secrets.Registry_URL }}/transcription-registry/${IMAGE_NAME}:public" \
+            --build-arg AppEnvironment=public \
+            --build-arg BuildNumber=${{ github.run_number }} \
+            --build-arg BuildId=${{ github.run_id }} \
+            --build-arg BuildUser=${{ github.actor }} \
+            .
+
+      - name: Push Docker image tags
+        run: |
+          docker push "${{ secrets.Registry_URL }}/transcription-registry/${IMAGE_NAME}:public"
