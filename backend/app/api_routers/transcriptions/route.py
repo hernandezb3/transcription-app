@@ -18,7 +18,6 @@ repository = TranscriptRepository()
 activity_repo = ActivityLogRepository()
 activity_mapper = ActivityLogMapper()
 
-
 @router.get("/{transcript_id}")
 async def get_transcript(transcript_id: int):
     result = await repository.aget(transcript_id)

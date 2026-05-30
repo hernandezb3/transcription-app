@@ -9,6 +9,7 @@ from app.mappers.activity_log_mapper import ActivityLogMapper
 from app.repositories.transcripts.controller import TranscriptsRepository
 from app.repositories.activity_log.controller import ActivityLogRepository
 from app.services.transcript_process.service import TranscriptProcessService
+from app.services.transcript_process.exceptions import TranscriptUploadError
 
 router = APIRouter(prefix="/transcripts")
 
@@ -116,9 +117,12 @@ async def upload_audio_file(
         if status >= 400:
             raise HTTPException(status_code=status, detail=result.get("message"))
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except TranscriptUploadError as e:
+        # Bad audio / bad transcript — structured, user-facing error for the UI.
+        raise HTTPException(status_code=e.status_code, detail=e.to_dict())
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to upload files: {str(e)}")
