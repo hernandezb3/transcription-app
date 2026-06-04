@@ -46,6 +46,9 @@ alembic
 psycopg[binary,pool]
 psycopg
 
+
+# transcription
+otterai-py
 # nemo-toolkit[asr]
 
 # transformers
