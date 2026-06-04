@@ -49,11 +49,27 @@ export async function POST(request: Request, context: RouteContext) {
     });
 
     if (!backendRes.ok) {
-      const text = await backendRes.text();
-      return NextResponse.json(
-        { error: text || `Backend returned ${backendRes.status}` },
-        { status: backendRes.status }
-      );
+      // FastAPI errors arrive as { detail: ... }. Our typed upload errors put a
+      // structured object there ({ message, code, file }); older paths put a
+      // plain string. Normalise both into { error, code, file } for the UI.
+      const raw = await backendRes.text();
+      let error = raw || `Backend returned ${backendRes.status}`;
+      let code: string | undefined;
+      let file: string | undefined;
+      try {
+        const body = JSON.parse(raw);
+        const detail = body?.detail ?? body?.error ?? body;
+        if (detail && typeof detail === "object") {
+          error = detail.message ?? error;
+          code = detail.code;
+          file = detail.file;
+        } else if (typeof detail === "string") {
+          error = detail;
+        }
+      } catch {
+        /* non-JSON body — keep the raw text */
+      }
+      return NextResponse.json({ error, code, file }, { status: backendRes.status });
     }
 
     const data = await backendRes.json();

@@ -1,3 +1,6 @@
+wheel
+setuptools
+
 #api framework
 fastapi
 uvicorn

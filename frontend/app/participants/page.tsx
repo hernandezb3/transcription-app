@@ -84,6 +84,19 @@ const naturalSort = (a: string, b: string) => {
   return a.localeCompare(b);
 };
 
+/** Pull the user-facing message out of a failed upload response. */
+const extractUploadError = async (res: Response): Promise<string> => {
+  try {
+    const body = await res.json();
+    if (body && typeof body.error === "string" && body.error.trim()) {
+      return body.error;
+    }
+  } catch {
+    /* non-JSON body — fall through to the generic message */
+  }
+  return "We couldn't process your files. Please double-check the audio and transcript, then try again.";
+};
+
 /* ------------------------------------------------------------------ */
 /*  Page                                                               */
 /* ------------------------------------------------------------------ */
@@ -112,6 +125,8 @@ export default function ParticipantsPage() {
 
   /* audio file */
   const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [audioDuration, setAudioDuration] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadStep, setUploadStep] = useState<"idle" | "creating" | "uploading" | "done" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState("");
@@ -119,6 +134,7 @@ export default function ParticipantsPage() {
 
   /* transcript file */
   const [transcriptFile, setTranscriptFile] = useState<File | null>(null);
+  const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [isDraggingTranscript, setIsDraggingTranscript] = useState(false);
   const transcriptFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -213,7 +229,10 @@ export default function ParticipantsPage() {
     setUploadMicColorId(mcId ?? null);
     setUploadLessonNumber(lesson ?? "");
     setAudioFile(null);
+    setAudioLoading(false);
+    setAudioDuration(null);
     setTranscriptFile(null);
+    setTranscriptLoading(false);
     setIsDragging(false);
     setIsDraggingTranscript(false);
     setUploadStep("idle");
@@ -229,20 +248,79 @@ export default function ParticipantsPage() {
     });
   };
 
+  /* small util — keeps the loading indicator visible long enough to read,
+     so selecting a file never looks like an instant "nothing happened" flash */
+  const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+  /* Read an audio file's duration via a throwaway <audio> element.
+     Resolves null if the browser can't decode it (or takes too long) so the
+     loader can never hang on a stubborn file. */
+  const readAudioDuration = (file: File) =>
+    new Promise<number | null>((resolve) => {
+      try {
+        const url = URL.createObjectURL(file);
+        const audio = document.createElement("audio");
+        let settled = false;
+        const finish = (val: number | null) => {
+          if (settled) return;
+          settled = true;
+          URL.revokeObjectURL(url);
+          resolve(val);
+        };
+        audio.preload = "metadata";
+        audio.onloadedmetadata = () =>
+          finish(Number.isFinite(audio.duration) ? audio.duration : null);
+        audio.onerror = () => finish(null);
+        setTimeout(() => finish(null), 8000);
+        audio.src = url;
+      } catch {
+        resolve(null);
+      }
+    });
+
+  /* Show the loader, read the file into a usable state, then reveal it.
+     finally{} guarantees the spinner clears even if reading ever throws —
+     a stuck spinner would be the exact "looks frozen" problem we're fixing. */
+  const loadAudioFile = async (file: File) => {
+    setAudioLoading(true);
+    setAudioFile(null);
+    setAudioDuration(null);
+    try {
+      const [duration] = await Promise.all([readAudioDuration(file), delay(400)]);
+      setAudioDuration(duration);
+      setAudioFile(file);
+    } finally {
+      setAudioLoading(false);
+    }
+  };
+
+  const loadTranscriptFile = async (file: File) => {
+    setTranscriptLoading(true);
+    setTranscriptFile(null);
+    try {
+      await Promise.all([file.text().catch(() => ""), delay(400)]);
+      setTranscriptFile(file);
+    } finally {
+      setTranscriptLoading(false);
+    }
+  };
+
   /* drag-and-drop helpers — audio */
   const onDragOver = (e: DragEvent) => { e.preventDefault(); setIsDragging(true); };
   const onDragLeave = (e: DragEvent) => { e.preventDefault(); setIsDragging(false); };
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
+    if (audioLoading) return;
     const file = e.dataTransfer.files[0];
     if (file && (file.type === "audio/mpeg" || file.type === "audio/wav" || file.name.toLowerCase().endsWith(".mp3") || file.name.toLowerCase().endsWith(".wav"))) {
-      setAudioFile(file);
+      void loadAudioFile(file);
     }
   };
   const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) setAudioFile(file);
+    e.target.value = ""; // reset so re-picking the same file still fires onChange
+    if (file) void loadAudioFile(file);
   };
 
   /* drag-and-drop helpers — transcript */
@@ -251,14 +329,24 @@ export default function ParticipantsPage() {
   const onDropTranscript = (e: DragEvent) => {
     e.preventDefault();
     setIsDraggingTranscript(false);
+    if (transcriptLoading) return;
     const file = e.dataTransfer.files[0];
     if (file && (file.type === "text/plain" || file.name.toLowerCase().endsWith(".txt"))) {
-      setTranscriptFile(file);
+      void loadTranscriptFile(file);
     }
   };
   const onTranscriptFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) setTranscriptFile(file);
+    e.target.value = ""; // reset so re-picking the same file still fires onChange
+    if (file) void loadTranscriptFile(file);
+  };
+
+  /* mm:ss formatter for the audio duration badge */
+  const fmtDuration = (sec: number | null) => {
+    if (sec == null || !Number.isFinite(sec)) return null;
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
   };
 
   const handleCreate = async (e: FormEvent<HTMLFormElement>) => {
@@ -312,8 +400,19 @@ export default function ParticipantsPage() {
           body: form,
         });
         if (!uploadRes.ok) {
-          // Transcript was created but upload failed — still reload
-          console.error("Upload failed", await uploadRes.text());
+          // The files couldn't be processed (bad audio / unparseable transcript).
+          // Roll back the transcript row we just created so the matrix never
+          // shows a phantom "Uploaded" cell, then surface the friendly message
+          // and keep the dialog open so the user can fix the file and retry.
+          const friendly = await extractUploadError(uploadRes);
+          try {
+            await fetch(`/api/transcripts/${newId}`, { method: "DELETE" });
+          } catch {
+            /* best-effort rollback */
+          }
+          setUploadStep("error");
+          setUploadMessage(friendly);
+          return;
         }
       }
 
@@ -322,9 +421,11 @@ export default function ParticipantsPage() {
       setUploadForParticipant(null);
       await loadAll(false);
     } catch (err) {
+      // Show the failure inside the dialog (the modal stays open). We deliberately
+      // do NOT set the page-level `error` here: it gates the whole table render and
+      // isn't cleared on close, which would leave the user stuck on a blank page.
       setUploadStep("error");
       setUploadMessage(err instanceof Error ? err.message : "Something went wrong.");
-      setError("Could not create transcript.");
     } finally {
       setIsCreating(false);
     }
@@ -837,16 +938,29 @@ export default function ParticipantsPage() {
                   onDragOver={onDragOver}
                   onDragLeave={onDragLeave}
                   onDrop={onDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-3 py-6 text-center transition-all duration-200 ${
-                    isDragging
-                      ? "border-sky-400 bg-sky-50/80 shadow-inner dark:border-sky-500 dark:bg-sky-900/20"
-                      : audioFile
-                        ? "border-emerald-400 bg-emerald-50/50 dark:border-emerald-500 dark:bg-emerald-900/20"
-                        : "border-zinc-200 bg-zinc-50/50 hover:border-sky-300 hover:bg-sky-50/30 dark:border-zinc-700 dark:bg-zinc-800/30 dark:hover:border-sky-600 dark:hover:bg-sky-900/10"
+                  onClick={() => { if (!audioLoading) fileInputRef.current?.click(); }}
+                  className={`group relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-3 py-6 text-center transition-all duration-200 ${
+                    audioLoading
+                      ? "cursor-wait border-sky-400 bg-sky-50/60 dark:border-sky-500 dark:bg-sky-900/20"
+                      : isDragging
+                        ? "cursor-pointer border-sky-400 bg-sky-50/80 shadow-inner dark:border-sky-500 dark:bg-sky-900/20"
+                        : audioFile
+                          ? "cursor-pointer border-emerald-400 bg-emerald-50/50 dark:border-emerald-500 dark:bg-emerald-900/20"
+                          : "cursor-pointer border-zinc-200 bg-zinc-50/50 hover:border-sky-300 hover:bg-sky-50/30 dark:border-zinc-700 dark:bg-zinc-800/30 dark:hover:border-sky-600 dark:hover:bg-sky-900/10"
                   }`}
                 >
-                  {audioFile ? (
+                  {audioLoading ? (
+                    <>
+                      <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-sky-100 dark:bg-sky-900/40">
+                        <svg className="h-5 w-5 animate-spin text-sky-500 dark:text-sky-400" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                      </div>
+                      <p className="text-xs font-semibold text-sky-600 dark:text-sky-400">Loading audio…</p>
+                      <p className="mt-0.5 text-[10px] text-zinc-400">Reading file</p>
+                    </>
+                  ) : audioFile ? (
                     <>
                       <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40">
                         <svg className="h-5 w-5 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -854,10 +968,13 @@ export default function ParticipantsPage() {
                         </svg>
                       </div>
                       <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 truncate max-w-full">{audioFile.name}</p>
-                      <p className="mt-0.5 text-[10px] text-zinc-400">{(audioFile.size / (1024 * 1024)).toFixed(1)} MB</p>
+                      <p className="mt-0.5 text-[10px] text-zinc-400">
+                        {(audioFile.size / (1024 * 1024)).toFixed(1)} MB
+                        {fmtDuration(audioDuration) ? ` · ${fmtDuration(audioDuration)}` : ""}
+                      </p>
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); setAudioFile(null); }}
+                        onClick={(e) => { e.stopPropagation(); setAudioFile(null); setAudioDuration(null); }}
                         className="mt-1.5 cursor-pointer text-[10px] font-medium text-zinc-400 underline decoration-zinc-300 underline-offset-2 hover:text-red-500 hover:decoration-red-300 transition-colors"
                       >
                         Remove
@@ -882,16 +999,29 @@ export default function ParticipantsPage() {
                   onDragOver={onDragOverTranscript}
                   onDragLeave={onDragLeaveTranscript}
                   onDrop={onDropTranscript}
-                  onClick={() => transcriptFileInputRef.current?.click()}
-                  className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-3 py-6 text-center transition-all duration-200 ${
-                    isDraggingTranscript
-                      ? "border-sky-400 bg-sky-50/80 shadow-inner dark:border-sky-500 dark:bg-sky-900/20"
-                      : transcriptFile
-                        ? "border-emerald-400 bg-emerald-50/50 dark:border-emerald-500 dark:bg-emerald-900/20"
-                        : "border-zinc-200 bg-zinc-50/50 hover:border-sky-300 hover:bg-sky-50/30 dark:border-zinc-700 dark:bg-zinc-800/30 dark:hover:border-sky-600 dark:hover:bg-sky-900/10"
+                  onClick={() => { if (!transcriptLoading) transcriptFileInputRef.current?.click(); }}
+                  className={`group relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-3 py-6 text-center transition-all duration-200 ${
+                    transcriptLoading
+                      ? "cursor-wait border-sky-400 bg-sky-50/60 dark:border-sky-500 dark:bg-sky-900/20"
+                      : isDraggingTranscript
+                        ? "cursor-pointer border-sky-400 bg-sky-50/80 shadow-inner dark:border-sky-500 dark:bg-sky-900/20"
+                        : transcriptFile
+                          ? "cursor-pointer border-emerald-400 bg-emerald-50/50 dark:border-emerald-500 dark:bg-emerald-900/20"
+                          : "cursor-pointer border-zinc-200 bg-zinc-50/50 hover:border-sky-300 hover:bg-sky-50/30 dark:border-zinc-700 dark:bg-zinc-800/30 dark:hover:border-sky-600 dark:hover:bg-sky-900/10"
                   }`}
                 >
-                  {transcriptFile ? (
+                  {transcriptLoading ? (
+                    <>
+                      <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-sky-100 dark:bg-sky-900/40">
+                        <svg className="h-5 w-5 animate-spin text-sky-500 dark:text-sky-400" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                      </div>
+                      <p className="text-xs font-semibold text-sky-600 dark:text-sky-400">Loading transcript…</p>
+                      <p className="mt-0.5 text-[10px] text-zinc-400">Reading file</p>
+                    </>
+                  ) : transcriptFile ? (
                     <>
                       <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40">
                         <svg className="h-5 w-5 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -923,12 +1053,12 @@ export default function ParticipantsPage() {
                 </div>
               </div>
 
-              {uploadStep === "error" && (
-                <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
-                  <svg className="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              {uploadStep === "error" && uploadMessage && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                  <svg className="mt-0.5 h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                   </svg>
-                  {uploadMessage}
+                  <span className="whitespace-pre-line">{uploadMessage}</span>
                 </div>
               )}
 
