@@ -4,6 +4,6 @@
     "defaultPageTitle": "Dashboard"
   },
   "api": {
-    "baseUrl": "http://backend:80"
+    "baseUrl": "http://backend:8080"
   }
 }
