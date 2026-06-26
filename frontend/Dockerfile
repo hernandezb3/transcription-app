@@ -12,7 +12,7 @@ ENV BuildUser=${BuildUser}
 
 WORKDIR /app
 
-COPY frontend/package.json frontend/package-lock.json* ./
+COPY package.json package-lock.json* ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --prefer-offline --no-audit
 
@@ -24,7 +24,7 @@ CMD ["npm", "run", "dev"]
 
 # ── Prod: build then serve ──
 FROM base AS build
-COPY frontend/ .
+COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 RUN date -u +"%Y-%m-%dT%H:%M:%SZ" > /app/.build-date
