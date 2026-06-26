@@ -55,7 +55,7 @@ audioop-lts
 ffmpeg
 
 # transcription
-otterai-py
+git+https://github.com/gmchad/otterai-api.git
 # nemo-toolkit[asr]
 
 # transformers
