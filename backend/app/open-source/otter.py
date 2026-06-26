@@ -1,13 +1,22 @@
+import os
+
 from otterai import OtterAI
-import time
+from pydub import AudioSegment
+
+username = os.environ.get("OTTER_USERNAME")
+password = os.environ.get("OTTER_PASSWORD")
 
 otter = OtterAI()
-#otter.login("brittney.hernandez476@gmail.com", "Vw4@Q.yM-fLn2DU7WCBT")
 
-otter.login("brittney.hernandez476@gmail.com", "LzKPnDh9e@GYYbNZKhhB")
+otter.login(username, password)
 
-# Try the MP3 with an explicit content type
-result = otter.upload_speech(r"C:\Users\bhernandez\Desktop\gitrepos\github\transcription-app\backend\app\open-source\3_dudes.mp3", content_type="audio/mpeg")
+# Try the MP3 with an explicit example
+file = "/Users/brittneyhernandez/Library/CloudStorage/OneDrive-UniversityofConnecticut/focus/project focus/focus_audio2/focus_meeting/focus_meeting_recorder_test_1.WAV"
+
+audio = AudioSegment.from_wav('yourfile.wav')
+audio.export('yourfile.mp3', format='mp3')
+
+result = otter.upload_speech(file, content_type="audio/wav")
 
 print(result)
 

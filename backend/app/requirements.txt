@@ -49,6 +49,10 @@ alembic
 psycopg[binary,pool]
 psycopg
 
+# audio converter
+pydub
+audioop-lts
+ffmpeg
 
 # transcription
 otterai-py

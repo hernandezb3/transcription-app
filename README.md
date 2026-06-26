@@ -4,7 +4,7 @@
 ## Add required packages to the requirements
 Add virtual environment in backend/app
 - Python version 13.3.3
-Match the Python version to what the Docker image (how it'll eventually be deployed) is.
+Match the Python version to what is in the Docker image is (i.e., how it'll eventually be deployed).
 
 
 # Set up the frontend
