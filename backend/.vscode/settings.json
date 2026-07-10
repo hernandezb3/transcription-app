@@ -6,6 +6,6 @@
         "python.testing.pytestEnabled": true,
         "sonarlint.connectedMode.project": {
             "connectionId": "SonarCloud",
-            "projectKey": "occourts_strategicinnovationsgroup-superguac-ai-services"
+            "projectKey": "temp"
         }
     }

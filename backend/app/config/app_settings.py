@@ -34,8 +34,8 @@ class SettingsConfig:
         self.settings.BuildInformation.init_time = datetime.strptime(datetime.strptime(datetime.now(tz=ZoneInfo('America/Los_Angeles')).strftime("%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H:%M:%S")        
         self.settings.BuildInformation.build_number = str(os.environ.get('BuildNumber', 0))
         self.settings.BuildInformation.build_id = str(os.environ.get('BuildId', 0))
-        self.settings.BuildInformation.build_user = os.environ.get('BuildUser','smitty@occourts.org')
-        self.settings.BuildInformation.build_url = f'https://occourts.visualstudio.com/TranslationServices/_build/results?buildId={self.settings.BuildInformation.build_id}&view=results'
+        self.settings.BuildInformation.build_user = os.environ.get('BuildUser','smitty@spongebob.org')
+        self.settings.BuildInformation.build_url = f'placeholder'
 
     def get_base_settings(self):
         
