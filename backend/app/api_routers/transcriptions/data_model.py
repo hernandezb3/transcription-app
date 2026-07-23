@@ -20,8 +20,15 @@ class TranscriptDetails(BaseModel):
 
 
 class TranscriptSectionUpdate(BaseModel):
-    """Payload for updating a single transcript section."""
+    """Payload for updating a single transcript section.
+
+    *speaker* is a display name – it is resolved to (or creates) a speaker
+    record and stored as *speaker_id*. Pass an empty string to clear it.
+    """
     speaker_id: Optional[int] = None
+    speaker: Optional[str] = None
+    begin_timestamp: Optional[str] = None
+    end_timestamp: Optional[str] = None
     edited_text: Optional[str] = None
     tags: Optional[List[str]] = None
 

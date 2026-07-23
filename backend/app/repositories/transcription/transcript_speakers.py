@@ -93,3 +93,34 @@ class TranscriptSpeakersRepository:
         )
         create_result = await self.acreate(create_data)
         return create_result.get("data", {}).get("id")
+
+    async def aget_or_create_by_name(self, transcription_id: int, name: str):
+        """
+        Look up an active speaker for a transcript by its display name
+        (or label). If none matches, create one. Returns the speaker id.
+
+        Used when a user assigns/types a speaker on an individual section.
+        """
+        query = sqlalchemy.select(
+            TranscriptSpeakersT.id,
+        ).where(
+            TranscriptSpeakersT.transcription_id == transcription_id,
+            TranscriptSpeakersT.is_active == 1,
+            sqlalchemy.or_(
+                TranscriptSpeakersT.display_name == name,
+                TranscriptSpeakersT.speaker_label == name,
+            ),
+        ).order_by(TranscriptSpeakersT.id.asc())
+        result = await self.database.aread(query)
+        rows = result.get("data", [])
+        if rows:
+            return rows[0]["id"]
+
+        create_data = TranscriptSpeakerCreate(
+            transcription_id=transcription_id,
+            speaker_label=name,
+            display_name=name,
+            is_active=1,
+        )
+        create_result = await self.acreate(create_data)
+        return create_result.get("data", {}).get("id")

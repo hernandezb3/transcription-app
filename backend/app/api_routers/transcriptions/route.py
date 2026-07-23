@@ -1,20 +1,23 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from app.api_routers.transcriptions.data_model import (
     TranscriptDetails,
     TranscriptSectionCreate,
     TranscriptSectionUpdate,
 )
+from app.auth.dependencies import get_current_user_id
 from app.mappers.transcription_mapper import TranscriptionMapper
 from app.mappers.activity_log_mapper import ActivityLogMapper
 from app.repositories.transcription.controller import TranscriptRepository
+from app.repositories.transcription.transcript_speakers import TranscriptSpeakersRepository
 from app.repositories.activity_log.controller import ActivityLogRepository
 
 router = APIRouter(prefix="/transcriptions")
 
 repository = TranscriptRepository()
+speakers_repo = TranscriptSpeakersRepository()
 activity_repo = ActivityLogRepository()
 activity_mapper = ActivityLogMapper()
 
@@ -30,18 +33,37 @@ async def get_transcript(transcript_id: int):
 
 
 @router.put("/sections/{section_id}")
-async def update_section(section_id: int, body: TranscriptSectionUpdate):
-    """Update speaker, edited_text, or tags for a single transcript section."""
+async def update_section(
+    section_id: int,
+    body: TranscriptSectionUpdate,
+    current_user_id: int = Depends(get_current_user_id),
+):
+    """Update speaker, timestamps, edited_text, or tags for a single section."""
     updates = body.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    # A *speaker* name is resolved to (or creates) a speaker record. An empty
+    # name clears the assignment. This overrides any raw speaker_id.
+    if "speaker" in updates:
+        speaker_name = (updates.pop("speaker") or "").strip()
+        row = await repository.aget_section(section_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Section not found")
+        if speaker_name:
+            updates["speaker_id"] = await speakers_repo.aget_or_create_by_name(
+                row["transcription_id"], speaker_name
+            )
+        else:
+            updates["speaker_id"] = None
+
     if "tags" in updates:
         updates["tags"] = TranscriptionMapper.serialize_tags(updates["tags"])
 
     # Stamp modified_at / modified_by
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     updates["modified_at"] = now
-    updates["modified_by"] = 1  # TODO: replace with authenticated user id
+    updates["modified_by"] = current_user_id
 
     result = await repository.aupdate_section(section_id, updates)
     status = result.get("status_code", 500)
@@ -58,15 +80,17 @@ async def update_section(section_id: int, body: TranscriptSectionUpdate):
             summary = f"Edited section #{sec}"
             if "edited_text" in changed:
                 summary = f"Edited text in section #{sec}"
-            elif "speaker_id" in changed:
+            elif "speaker" in changed or "speaker_id" in changed:
                 summary = f"Changed speaker on section #{sec}"
+            elif "begin_timestamp" in changed or "end_timestamp" in changed:
+                summary = f"Adjusted timestamps on section #{sec}"
 
             log = activity_mapper.to_create_values(
                 transcription_id=tid,
                 action="section_edited",
                 section_id=row.get("section_id"),
                 summary=summary,
-                user_id=1,
+                user_id=current_user_id,
             )
             await activity_repo.acreate(log)
 
@@ -82,7 +106,7 @@ async def update_section(section_id: int, body: TranscriptSectionUpdate):
                     action="tags_updated",
                     section_id=row.get("section_id"),
                     summary=tag_summary,
-                    user_id=1,
+                    user_id=current_user_id,
                 )
                 await activity_repo.acreate(tag_log)
     except Exception:
@@ -92,7 +116,11 @@ async def update_section(section_id: int, body: TranscriptSectionUpdate):
 
 
 @router.post("/{transcript_id}/sections")
-async def create_section(transcript_id: int, body: TranscriptSectionCreate):
+async def create_section(
+    transcript_id: int,
+    body: TranscriptSectionCreate,
+    current_user_id: int = Depends(get_current_user_id),
+):
     """Add a new section to a transcript.
 
     *position* (1-based) controls where the section is inserted.
@@ -137,7 +165,7 @@ async def create_section(transcript_id: int, body: TranscriptSectionCreate):
             action="section_added",
             section_id=position,
             summary=f"Added new section at position #{position}",
-            user_id=1,
+            user_id=current_user_id,
         )
         await activity_repo.acreate(log)
     except Exception:
@@ -151,7 +179,10 @@ async def create_section(transcript_id: int, body: TranscriptSectionCreate):
 
 
 @router.delete("/sections/{section_id}")
-async def delete_section(section_id: int):
+async def delete_section(
+    section_id: int,
+    current_user_id: int = Depends(get_current_user_id),
+):
     """Soft-delete a transcript section and compact the remaining order."""
     row = await repository.aget_section(section_id)
     if not row:
@@ -176,7 +207,7 @@ async def delete_section(section_id: int):
             action="section_deleted",
             section_id=row.get("section_id"),
             summary=f"Deleted section #{row.get('section_id', '?')}",
-            user_id=1,
+            user_id=current_user_id,
         )
         await activity_repo.acreate(log)
     except Exception:

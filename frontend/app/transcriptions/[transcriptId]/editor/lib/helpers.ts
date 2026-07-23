@@ -12,6 +12,35 @@ export function formatTimestamp(ts: string | null): string {
   return ts;
 }
 
+/**
+ * Normalize a user-entered timestamp to "HH:MM:SS" (or "HH:MM:SS.mmm" when
+ * milliseconds are supplied). Accepts "SS", "MM:SS", "HH:MM:SS" with optional
+ * ".mmm". Returns "" for blank input, or the raw string if it can't be parsed.
+ */
+export function normalizeTimestamp(input: string): string {
+  const raw = input.trim();
+  if (!raw) return "";
+  const [clock, msPart] = raw.split(".");
+  const parts = clock.split(":").map((p) => parseInt(p, 10));
+  if (parts.some((n) => Number.isNaN(n))) return raw;
+
+  let h = 0, m = 0, s = 0;
+  if (parts.length === 3) [h, m, s] = parts;
+  else if (parts.length === 2) [m, s] = parts;
+  else s = parts[0];
+
+  // Carry any overflow (e.g. 90s → 1m30s)
+  m += Math.floor(s / 60); s %= 60;
+  h += Math.floor(m / 60); m %= 60;
+
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  let out = `${pad(h)}:${pad(m)}:${pad(s)}`;
+  if (msPart !== undefined && msPart !== "") {
+    out += `.${(msPart + "000").slice(0, 3)}`;
+  }
+  return out;
+}
+
 /** Convert a number of seconds to a display string like 1:23 or 1:02:03 */
 export function formatSecondsToTime(totalSec: number): string {
   const h = Math.floor(totalSec / 3600);

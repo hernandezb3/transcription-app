@@ -19,6 +19,8 @@ import InlineEdit from "./components/inline-edit";
 import TagEditor from "./components/tag-editor";
 import PlayIcon from "./components/play-icon";
 import SearchSelect from "./components/search-select";
+import SpeakerSelect from "./components/speaker-select";
+import TimeEdit from "./components/time-edit";
 import DiffModal from "./components/diff-modal";
 import EditorActivity from "./components/editor-activity";
 import CommentsPanel from "./components/comments-panel";
@@ -291,7 +293,7 @@ export default function TranscriptEditorPage() {
 
   const saveField = async (
     sectionDbId: number,
-    field: "edited_text",
+    field: "edited_text" | "begin_timestamp" | "end_timestamp",
     value: string
   ) => {
     setSavingId(sectionDbId);
@@ -309,6 +311,29 @@ export default function TranscriptEditorPage() {
       if (showEditorActivity) fetchRecentEdits(true);
     } catch {
       alert("Failed to save – please try again.");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  /* ---------- Assign / change a single section's speaker ---------- */
+
+  const saveSectionSpeaker = async (sectionDbId: number, name: string) => {
+    setSavingId(sectionDbId);
+    try {
+      const res = await fetch(`/api/transcriptions/sections/${sectionDbId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ speaker: name }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      // The displayed speaker is derived from a join on speaker_id (and the
+      // save may create a brand-new speaker), so refetch to stay in sync.
+      await fetchSections();
+      await fetchSpeakers();
+      if (showEditorActivity) fetchRecentEdits(true);
+    } catch {
+      alert("Failed to save speaker – please try again.");
     } finally {
       setSavingId(null);
     }
@@ -1115,18 +1140,30 @@ export default function TranscriptEditorPage() {
                     <div className="flex-1 min-w-0 p-3.5 pl-5">
                       {/* speaker + timestamps */}
                       <div className="flex flex-wrap items-center gap-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className={`flex h-6 w-6 items-center justify-center rounded-full text-[9px] font-bold ring-2 ${color.bg} ${color.text} ${color.ring}`}>
-                            {getSpeakerInitials(speakerName)}
-                          </div>
-                          <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-                            {speakerName ?? ""}
-                          </span>
-                        </div>
+                        <SpeakerSelect
+                          value={speakerName}
+                          options={uniqueSpeakers}
+                          onSave={(name) => saveSectionSpeaker(section.id, name)}
+                          onEditStart={pausePlayback}
+                          color={color}
+                          getInitials={getSpeakerInitials}
+                        />
                         <div className="flex items-center gap-1.5">
-                          <span className="inline-flex items-center gap-1 rounded-lg bg-zinc-100 px-2.5 py-1 text-xs font-mono text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                          <span className="inline-flex items-center gap-1 rounded-lg bg-zinc-100 px-2 py-0.5 text-xs font-mono text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 text-zinc-400"><path fillRule="evenodd" d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z" clipRule="evenodd" /></svg>
-                            {formatTimestamp(section.begin_timestamp)} → {formatTimestamp(section.end_timestamp)}
+                            <TimeEdit
+                              value={section.begin_timestamp}
+                              onSave={(v) => saveField(section.id, "begin_timestamp", v)}
+                              onEditStart={pausePlayback}
+                              label="start time"
+                            />
+                            <span className="text-zinc-400">→</span>
+                            <TimeEdit
+                              value={section.end_timestamp}
+                              onSave={(v) => saveField(section.id, "end_timestamp", v)}
+                              onEditStart={pausePlayback}
+                              label="end time"
+                            />
                           </span>
                         </div>
                       </div>
