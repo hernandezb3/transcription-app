@@ -207,3 +207,4 @@ __marimo__/
 
 
 local_deploy_run.sh
+secrets.env

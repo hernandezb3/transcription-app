@@ -4,9 +4,6 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { settings } from "@/lib/settings";
-
-const API_BASE = settings.api?.baseUrl ?? "";
 
 export default function RegisterPage() {
   const { login } = useAuth();
@@ -43,7 +40,7 @@ export default function RegisterPage() {
 
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/auth/register`, {
+      const res = await fetch(`/api/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

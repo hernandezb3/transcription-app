@@ -1,4 +1,5 @@
 from app.infrastructure.storage.azure_storage import AzureBlobStorageFactory
+from app.infrastructure.storage.spaces_storage import SpacesStorageFactory
 from app.config.app_settings import SettingsConfig
 from app.config.app_logging import AppLogging
 
@@ -16,11 +17,24 @@ class StorageFactory:
         self._logger = AppLogging().logger
         self._service_provider = SettingsConfig().settings.Storage.ServiceProvider
 
+        # Map provider name -> backend CLASS (not an instance) and construct only
+        # the selected one. Instantiating every backend eagerly would build an
+        # Azure client even when Spaces is configured (and vice versa), which
+        # fails because each backend needs its own provider-specific settings.
         service_providers = {
-            'AzureStorageAccount': AzureBlobStorageFactory()
+            'AzureStorageAccount': AzureBlobStorageFactory,
+            'Azurite': AzureBlobStorageFactory,
+            'Spaces': SpacesStorageFactory,
+            'S3': SpacesStorageFactory,
         }
 
-        self.factory = service_providers.get(self._service_provider)
+        provider_cls = service_providers.get(self._service_provider)
+        if provider_cls is None:
+            raise ValueError(
+                f"Unsupported storage provider: {self._service_provider!r}. "
+                f"Supported: {', '.join(service_providers)}"
+            )
+        self.factory = provider_cls()
         self._health = True
 
     def upload(self, file_bytes, path):

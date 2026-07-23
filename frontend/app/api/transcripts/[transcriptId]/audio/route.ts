@@ -1,4 +1,4 @@
-import { settings } from "@/lib/settings";
+import { apiBaseUrl } from "@/lib/settings";
 import { getAuthToken } from "@/lib/api-client";
 import { NextResponse } from "next/server";
 
@@ -24,7 +24,7 @@ export async function HEAD(_: Request, context: RouteContext) {
     return new NextResponse(null, { status: 400 });
   }
 
-  const baseUrl = settings.api?.baseUrl;
+  const baseUrl = apiBaseUrl;
   if (!baseUrl) {
     return new NextResponse(null, { status: 500 });
   }
@@ -48,7 +48,7 @@ export async function GET(_: Request, context: RouteContext) {
     return NextResponse.json({ error: "Invalid transcript id" }, { status: 400 });
   }
 
-  const baseUrl = settings.api?.baseUrl;
+  const baseUrl = apiBaseUrl;
   if (!baseUrl) {
     return NextResponse.json({ error: "Backend API URL not configured" }, { status: 500 });
   }

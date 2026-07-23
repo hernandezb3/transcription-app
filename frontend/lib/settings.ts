@@ -22,3 +22,13 @@ if (!selectedSettings) {
 }
 
 export const settings = selectedSettings;
+
+/**
+ * Server-side base URL for the FastAPI backend. Overridable at runtime via the
+ * API_BASE_URL env var (set in the Kubernetes Deployment to the in-cluster
+ * service, e.g. http://transcription-api); otherwise falls back to the
+ * per-environment settings file for local development. This is NOT exposed to
+ * the browser — every backend call is proxied through Next.js route handlers.
+ */
+export const apiBaseUrl =
+  process.env.API_BASE_URL ?? settings.api?.baseUrl ?? "";

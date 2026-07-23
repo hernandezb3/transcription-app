@@ -1,4 +1,4 @@
-import { settings } from "@/lib/settings";
+import { apiBaseUrl } from "@/lib/settings";
 import { cookies } from "next/headers";
 
 export class ApiClientError extends Error {
@@ -29,7 +29,7 @@ export async function getAuthToken(): Promise<string | undefined> {
 export class FastApiClient {
   private readonly baseUrl: string;
 
-  constructor(baseUrl = settings.api?.baseUrl) {
+  constructor(baseUrl = apiBaseUrl) {
     if (!baseUrl) {
       throw new ApiClientError("settings.api.baseUrl is not configured", 500);
     }

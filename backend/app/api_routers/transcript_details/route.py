@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from app.api_routers.transcript_details.data_model import (
     TranscriptDetailsComments,
     TranscriptDetailsCommentsCreateIngest
 )
+from app.auth.dependencies import get_current_user_id
 from app.mappers.transcript_details_comments import TranscriptDetailsCommentsMapper
 from app.mappers.activity_log_mapper import ActivityLogMapper
 from app.repositories.transcription.transcript_details_comments import TranscriptDetailsCommentsRepository
@@ -18,8 +19,12 @@ activity_mapper = ActivityLogMapper()
 mention_service = MentionService()
 
 @router.post("/{transcript_id}/comments")
-async def create_comment(transcript_id: int, comment_data: TranscriptDetailsCommentsCreateIngest):
-    mapped_data = mapper.to_create_values(comment_data, transcript_id=transcript_id)
+async def create_comment(
+    transcript_id: int,
+    comment_data: TranscriptDetailsCommentsCreateIngest,
+    current_user_id: int = Depends(get_current_user_id),
+):
+    mapped_data = mapper.to_create_values(comment_data, transcript_id=transcript_id, user_id=current_user_id)
     result = await repository.acreate(data=mapped_data)
     if result.get("status_code") == 201:
         comment_id = result.get("id")
@@ -31,7 +36,7 @@ async def create_comment(transcript_id: int, comment_data: TranscriptDetailsComm
                     text=comment_data.comment,
                     entity_type="detail_comment",
                     entity_id=comment_id,
-                    author_user_id=1,
+                    author_user_id=current_user_id,
                     context_title="comment",
                     route=f"/transcriptions/{transcript_id}/editor",
                 )
@@ -46,7 +51,7 @@ async def create_comment(transcript_id: int, comment_data: TranscriptDetailsComm
                 action="comment_added",
                 section_id=comment_data.section_id,
                 summary=f"Commented on section #{comment_data.section_id}: \"{preview}{'…' if len(comment_data.comment or '') > 60 else ''}\"",
-                user_id=1,
+                user_id=current_user_id,
             )
             await activity_repo.acreate(log)
         except Exception:

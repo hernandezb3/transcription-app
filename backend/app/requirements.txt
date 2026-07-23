@@ -35,6 +35,11 @@ azure-storage-blob
 azure-identity
 azure-keyvault
 
+# DigitalOcean Spaces (S3-compatible) storage backend.
+# Pinned: an unpinned boto3 makes pip's resolver backtrack across 400+ versions
+# against the rest of this (large) requirement set and effectively hang.
+boto3==1.35.99
+
 #unit testing
 pytest
 pytest-cov
@@ -51,11 +56,18 @@ psycopg
 
 # audio converter
 pydub
-audioop-lts
+# audioop was removed from the stdlib in 3.13; the backport only exists (and is
+# only needed) there. On the 3.10 image audioop is built in, so skip it.
+audioop-lts; python_version >= "3.13"
 ffmpeg
 
 # transcription
-git+https://github.com/gmchad/otterai-api.git
+# otterai-api's current HEAD requires Python >=3.14 (this image is 3.10) and is
+# only referenced by the standalone app/open-source/otter.py, which the FastAPI
+# app never imports — so it's excluded from the deployed image. If the Otter.ai
+# import path is ever wired in, re-add it here on a Python 3.14+ base image (or
+# pin an older otterai-api commit that supports 3.10).
+# git+https://github.com/gmchad/otterai-api.git
 # nemo-toolkit[asr]
 
 # transformers

@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transcription-api
+  namespace: transcription
+  labels:
+    app: transcription-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transcription-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Replace in place (no surge): the cluster's small node pool can't fit a
+      # second API pod alongside the old one during a rollout. Brief downtime on
+      # deploy is acceptable for this single-replica app.
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: transcription-api
+    spec:
+      imagePullSecrets:
+        - name: registry-okeanoslabs-registry
+      containers:
+        - name: transcription-api
+          image: registry.digitalocean.com/okeanoslabs-registry/transcription-api:latest
+          imagePullPolicy: Always
+          # The prod Dockerfile CMD binds :80 (needs root); bind :8080 instead so
+          # the app matches the Service targetPort and runs on an unprivileged port.
+          command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: AppEnvironment
+              value: public
+          # db_connection_string, storage_config, JWT_SECRET_KEY (+ optional
+          # JWT_EXPIRE_MINUTES) all come from this Secret as env vars. The config
+          # loader reads db_connection_string / storage_config via its
+          # SecretManager; auth reads JWT_SECRET_KEY directly.
+          envFrom:
+            - secretRef:
+                name: transcription-api-settings
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 320Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transcription-api
+  namespace: transcription
+  labels:
+    app: transcription-api
+spec:
+  type: ClusterIP
+  selector:
+    app: transcription-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

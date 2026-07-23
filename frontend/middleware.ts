@@ -9,12 +9,20 @@ import { NextRequest, NextResponse } from "next/server";
  */
 
 const PUBLIC_PAGES = ["/login", "/register"];
+// Auth endpoints are called precisely when the user is NOT logged in, so they
+// must bypass the cookie check below (which otherwise 401s every /api/* route).
+const PUBLIC_API = ["/api/auth/login", "/api/auth/register"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // ---- Always allow public pages ----
   if (PUBLIC_PAGES.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
+    return NextResponse.next();
+  }
+
+  // ---- Always allow public auth API (login/register, used when logged out) ----
+  if (PUBLIC_API.some((p) => pathname === p)) {
     return NextResponse.next();
   }
 

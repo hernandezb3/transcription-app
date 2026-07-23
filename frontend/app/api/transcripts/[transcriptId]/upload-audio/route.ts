@@ -1,4 +1,4 @@
-import { settings } from "@/lib/settings";
+import { apiBaseUrl } from "@/lib/settings";
 import { getAuthToken } from "@/lib/api-client";
 import { NextResponse } from "next/server";
 
@@ -21,7 +21,7 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  const baseUrl = settings.api?.baseUrl;
+  const baseUrl = apiBaseUrl;
   if (!baseUrl) {
     return NextResponse.json(
       { error: "Backend API URL not configured" },

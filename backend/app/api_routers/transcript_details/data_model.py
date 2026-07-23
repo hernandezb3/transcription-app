@@ -15,7 +15,7 @@ class TranscriptDetailsCommentsCreate(BaseModel):
     transcription_id: Optional[int] = None
     section_id: Optional[int] = None
     comment: Optional[str] = None
-    created_by: Optional[int] = 1
+    created_by: Optional[int] = None
     created_at: Optional[str] = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     is_active: Optional[int] = 1
 

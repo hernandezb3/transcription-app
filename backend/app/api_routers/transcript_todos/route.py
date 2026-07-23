@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
+from app.auth.dependencies import get_current_user_id
 from app.repositories.transcript_todos.controller import TranscriptTodosRepository
 from app.data_models.transcript_todos import TodoCreate, TodoUpdate, TodoEntry
 from app.mappers.transcript_todos_mapper import TodoMapper
@@ -24,13 +25,17 @@ async def list_todos(transcript_id: int):
 
 
 @router.post("/{transcript_id}/todos", status_code=201)
-async def create_todo(transcript_id: int, body: TodoCreate):
+async def create_todo(
+    transcript_id: int,
+    body: TodoCreate,
+    current_user_id: int = Depends(get_current_user_id),
+):
     """Create a new todo item."""
     result = await repo.acreate(
         transcription_id=transcript_id,
         title=body.title,
         sort_order=body.sort_order or 0,
-        user_id=1,  # TODO: real auth
+        user_id=current_user_id,
     )
 
     # Process @mentions in the todo title (best-effort)
@@ -48,7 +53,7 @@ async def create_todo(transcript_id: int, body: TodoCreate):
                 text=body.title,
                 entity_type="todo",
                 entity_id=todo_id,
-                author_user_id=1,
+                author_user_id=current_user_id,
                 context_title="to-do",
                 route=f"/transcriptions/{transcript_id}",
             )
@@ -63,7 +68,7 @@ async def create_todo(transcript_id: int, body: TodoCreate):
             action="todo_created",
             section_id=None,
             summary=f"Added todo: \"{preview}{'…' if len(body.title or '') > 60 else ''}\"",
-            user_id=1,
+            user_id=current_user_id,
         )
         await activity_repo.acreate(log)
     except Exception:
@@ -75,7 +80,12 @@ async def create_todo(transcript_id: int, body: TodoCreate):
 
 
 @router.put("/{transcript_id}/todos/{todo_id}")
-async def update_todo(transcript_id: int, todo_id: int, body: TodoUpdate):
+async def update_todo(
+    transcript_id: int,
+    todo_id: int,
+    body: TodoUpdate,
+    current_user_id: int = Depends(get_current_user_id),
+):
     """Update a todo (title, completion, sort order)."""
     values: dict = {}
     if body.title is not None:
@@ -113,7 +123,7 @@ async def update_todo(transcript_id: int, todo_id: int, body: TodoUpdate):
                 action=action,
                 section_id=None,
                 summary=summary,
-                user_id=1,
+                user_id=current_user_id,
             )
             await activity_repo.acreate(log)
     except Exception:
@@ -125,7 +135,11 @@ async def update_todo(transcript_id: int, todo_id: int, body: TodoUpdate):
 
 
 @router.delete("/{transcript_id}/todos/{todo_id}")
-async def delete_todo(transcript_id: int, todo_id: int):
+async def delete_todo(
+    transcript_id: int,
+    todo_id: int,
+    current_user_id: int = Depends(get_current_user_id),
+):
     """Soft-delete a todo."""
     await repo.adelete(todo_id)
 
@@ -136,7 +150,7 @@ async def delete_todo(transcript_id: int, todo_id: int):
             action="todo_deleted",
             section_id=None,
             summary=f"Deleted todo #{todo_id}",
-            user_id=1,
+            user_id=current_user_id,
         )
         await activity_repo.acreate(log)
     except Exception:

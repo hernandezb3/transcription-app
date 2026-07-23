@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 
+from app.auth.dependencies import get_current_user_id
 from app.repositories.transcript_threads.controller import TranscriptThreadsRepository
 from app.data_models.transcript_threads import ThreadCreate, ThreadUpdate, PostCreate, PostUpdate
 from app.mappers.transcript_threads_mapper import ThreadMapper
@@ -58,12 +59,16 @@ async def get_thread(transcript_id: int, thread_id: int):
 
 
 @router.post("/{transcript_id}/threads", status_code=201)
-async def create_thread(transcript_id: int, body: ThreadCreate):
+async def create_thread(
+    transcript_id: int,
+    body: ThreadCreate,
+    current_user_id: int = Depends(get_current_user_id),
+):
     """Create a new discussion thread."""
     result = await repo.acreate_thread(
         transcription_id=transcript_id,
         title=body.title,
-        user_id=1,  # TODO: real auth
+        user_id=current_user_id,
     )
 
     # Process @mentions in the thread title (best-effort)
@@ -80,7 +85,7 @@ async def create_thread(transcript_id: int, body: ThreadCreate):
                 text=body.title,
                 entity_type="thread",
                 entity_id=thread_id,
-                author_user_id=1,
+                author_user_id=current_user_id,
                 context_title="discussion thread",
                 route=f"/transcriptions/{transcript_id}/threads",
             )
@@ -95,7 +100,7 @@ async def create_thread(transcript_id: int, body: ThreadCreate):
             action="thread_created",
             section_id=None,
             summary=f"Started thread: \"{preview}{'…' if len(body.title or '') > 60 else ''}\"",
-            user_id=1,
+            user_id=current_user_id,
         )
         await activity_repo.acreate(log)
     except Exception:
@@ -121,7 +126,11 @@ async def update_thread(transcript_id: int, thread_id: int, body: ThreadUpdate):
 
 
 @router.delete("/{transcript_id}/threads/{thread_id}")
-async def delete_thread(transcript_id: int, thread_id: int):
+async def delete_thread(
+    transcript_id: int,
+    thread_id: int,
+    current_user_id: int = Depends(get_current_user_id),
+):
     """Soft-delete a thread."""
     await repo.adelete_thread(thread_id)
 
@@ -132,7 +141,7 @@ async def delete_thread(transcript_id: int, thread_id: int):
             action="thread_deleted",
             section_id=None,
             summary=f"Deleted thread #{thread_id}",
-            user_id=1,
+            user_id=current_user_id,
         )
         await activity_repo.acreate(log)
     except Exception:
@@ -154,13 +163,18 @@ async def list_posts(transcript_id: int, thread_id: int):
 
 
 @router.post("/{transcript_id}/threads/{thread_id}/posts", status_code=201)
-async def create_post(transcript_id: int, thread_id: int, body: PostCreate):
+async def create_post(
+    transcript_id: int,
+    thread_id: int,
+    body: PostCreate,
+    current_user_id: int = Depends(get_current_user_id),
+):
     """Add a post to a thread."""
     result = await repo.acreate_post(
         thread_id=thread_id,
         body=body.body,
         parent_post_id=body.parent_post_id,
-        user_id=1,  # TODO: real auth
+        user_id=current_user_id,
     )
 
     # Process @mentions in the post body (best-effort)
@@ -177,7 +191,7 @@ async def create_post(transcript_id: int, thread_id: int, body: PostCreate):
                 text=body.body,
                 entity_type="thread_post",
                 entity_id=post_id,
-                author_user_id=1,
+                author_user_id=current_user_id,
                 context_title="thread reply",
                 route=f"/transcriptions/{transcript_id}/threads",
             )
@@ -192,7 +206,7 @@ async def create_post(transcript_id: int, thread_id: int, body: PostCreate):
             action="thread_reply",
             section_id=None,
             summary=f"Replied in thread #{thread_id}: \"{preview}{'…' if len(body.body or '') > 60 else ''}\"",
-            user_id=1,
+            user_id=current_user_id,
         )
         await activity_repo.acreate(log)
     except Exception:

@@ -1,0 +1,68 @@
+{
+  "BuildInformation": {
+    "init_time": "2025-12-18T12:36:15",
+    "build_number": "0",
+    "build_id": "0",
+    "build_user": "smitty@spongebob.org",
+    "build_url": ""
+  },
+  "RuntimeSettings": {
+    "CORS": [
+      "https://transcriptions-uconn.okeanoslabs.com"
+    ],
+    "UAIClientId": "",
+    "AppURL": "https://transcriptions-uconn.okeanoslabs.com"
+  },
+  "AuthorizationProvider": {
+    "ServiceProvider": "AzureAD",
+    "Settings": {
+      "AppRegistrationTenantId": "",
+      "AppRegistrationClientId": "",
+      "AppRegistrationClientSecret": "",
+      "Scope": {
+        "Path": "api://na/Full",
+        "Name": "Full"
+      }
+    }
+  },
+  "ApplicationLogging": {
+    "ServiceProvider": "Console",
+    "Settings": {
+      "ConnectionString": ""
+    }
+  },
+  "SecretManager": {
+    "ServiceProvider": "Environment",
+    "Settings": {
+      "URL": "https://env.local",
+      "Secrets": [
+        {
+          "secret": "db_connection_string",
+          "mapping": "TransactionalDatabase.Settings.ConnectionString",
+          "content_type": "string"
+        },
+        {
+          "secret": "storage_config",
+          "mapping": "Storage.Settings",
+          "content_type": "json"
+        }
+      ]
+    }
+  },
+  "TransactionalDatabase": {
+    "ServiceProvider": "SQL",
+    "Settings": {
+      "Type": "PostgresSQL",
+      "ConnectionString": "",
+      "AuthenticationType": "UsernamePassword",
+      "BaseSchema": "public"
+    }
+  },
+  "Storage": {
+    "ServiceProvider": "Spaces",
+    "Settings": {
+      "ContainerName": "transcription-files",
+      "PoolSize": 5
+    }
+  }
+}

@@ -1,0 +1,152 @@
+name: Deploy to DOKS
+
+# Self-contained CI/CD for the DigitalOcean Kubernetes deployment.
+# On push to main (or manual dispatch): detect which service changed, build its
+# image, push to DOCR, and roll out the Deployment on the okeanoslabs cluster.
+# A single DIGITALOCEAN_ACCESS_TOKEN repo secret authenticates both DOCR and
+# kubectl (via doctl) — no separate registry creds or kubeconfig needed.
+
+on:
+  # Auto-deploy on push is DISABLED until the DIGITALOCEAN_ACCESS_TOKEN repo
+  # secret is set (see infra/k8s/README.md). Re-enable by uncommenting the
+  # `push:` block below; until then, deploy manually via "Run workflow".
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - 'backend/**'
+  #     - 'frontend/**'
+  #     - 'infra/k8s/**'
+  #     - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Which service to build & deploy
+        type: choice
+        default: all
+        options: [all, backend, frontend]
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: registry.digitalocean.com/okeanoslabs-registry
+  CLUSTER: okeanoslabs-cluster
+  NAMESPACE: transcription
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      services_json: ${{ steps.detect.outputs.services_json }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_SERVICE: ${{ github.event.inputs.service }}
+          BEFORE_SHA: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          b=false; f=false
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            case "${INPUT_SERVICE:-all}" in
+              all)      b=true; f=true ;;
+              backend)  b=true ;;
+              frontend) f=true ;;
+            esac
+          else
+            BASE="${BEFORE_SHA:-}"
+            if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+              if git cat-file -e "${SHA}~1^{commit}" 2>/dev/null; then BASE="$(git rev-parse "${SHA}~1")"; else BASE="$SHA"; fi
+            fi
+            if [ "$BASE" = "$SHA" ]; then
+              FILES="$(git show --name-only --format= "$SHA")"
+            else
+              FILES="$(git diff --name-only "$BASE" "$SHA")"
+            fi
+            printf '%s\n' "$FILES" | grep -q '^backend/'  && b=true || true
+            printf '%s\n' "$FILES" | grep -q '^frontend/' && f=true || true
+            # A change to shared k8s manifests redeploys both.
+            printf '%s\n' "$FILES" | grep -qE '^infra/k8s/|^.github/workflows/deploy.yml' && { b=true; f=true; } || true
+          fi
+          svcs=""
+          [ "$b" = true ] && svcs="$svcs backend" || true
+          [ "$f" = true ] && svcs="$svcs frontend" || true
+          svcs="$(echo $svcs | xargs || true)"
+          if [ -n "$svcs" ]; then
+            services_json="$(printf '%s\n' $svcs | jq -R . | jq -s -c .)"
+          else
+            services_json="[]"
+          fi
+          echo "services_json=$services_json" >> "$GITHUB_OUTPUT"
+          echo "Deploying: ${svcs:-<none>}"
+
+  deploy:
+    needs: detect
+    if: ${{ needs.detect.outputs.services_json != '' && needs.detect.outputs.services_json != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect.outputs.services_json) }}
+    concurrency:
+      group: deploy-${{ matrix.service }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Log in to DOCR
+        run: doctl registry login --expiry-seconds 1200
+
+      - name: Resolve service -> image/dir/deployment
+        id: svc
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: |
+          set -euo pipefail
+          case "$SERVICE" in
+            backend)  echo "image=transcription-api"  >> "$GITHUB_OUTPUT"; echo "dir=backend"  >> "$GITHUB_OUTPUT"; echo "deploy=transcription-api" >> "$GITHUB_OUTPUT" ;;
+            frontend) echo "image=transcription-ui"   >> "$GITHUB_OUTPUT"; echo "dir=frontend" >> "$GITHUB_OUTPUT"; echo "deploy=transcription-ui"  >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::unknown service '$SERVICE'"; exit 1 ;;
+          esac
+
+      - name: Build & push image
+        env:
+          IMG: ${{ env.REGISTRY }}/${{ steps.svc.outputs.image }}
+          DIR: ${{ steps.svc.outputs.dir }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          TAG="sha-${SHA:0:7}"
+          # Context is the service dir (the Dockerfiles COPY paths relative to it).
+          docker build \
+            -f "$DIR/Dockerfile" --target prod \
+            --build-arg AppEnvironment=public \
+            --build-arg BuildNumber="${{ github.run_number }}" \
+            --build-arg BuildId="${{ github.run_id }}" \
+            --build-arg BuildUser="${{ github.actor }}" \
+            -t "$IMG:$TAG" -t "$IMG:latest" \
+            "$DIR"
+          docker push "$IMG:$TAG"
+          docker push "$IMG:latest"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: Save kubeconfig
+        run: doctl kubernetes cluster kubeconfig save "$CLUSTER"
+
+      - name: Roll out
+        env:
+          IMG: ${{ env.REGISTRY }}/${{ steps.svc.outputs.image }}
+          DEPLOY: ${{ steps.svc.outputs.deploy }}
+        run: |
+          set -euo pipefail
+          kubectl -n "$NAMESPACE" set image "deploy/$DEPLOY" "$DEPLOY=$IMG:$TAG"
+          kubectl -n "$NAMESPACE" rollout status "deploy/$DEPLOY" --timeout=300s

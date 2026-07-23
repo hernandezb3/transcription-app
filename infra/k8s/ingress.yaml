@@ -1,0 +1,31 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: transcription
+  namespace: transcription
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Audio uploads can be large; relax nginx body size + timeouts.
+    nginx.ingress.kubernetes.io/proxy-body-size: "512m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  ingressClassName: nginx
+  rules:
+    # Only the frontend is exposed publicly. The FastAPI backend is reached
+    # in-cluster by the Next.js server (Service transcription-api), never directly
+    # from the browser.
+    - host: transcriptions-uconn.okeanoslabs.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: transcription-ui
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - transcriptions-uconn.okeanoslabs.com
+      secretName: transcription-tls

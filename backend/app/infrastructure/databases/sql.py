@@ -31,12 +31,23 @@ class SQLFactory:
         sync_connect_args = {}
         async_connect_args = {}
 
-        # Local Postgres instances commonly run without SSL.
-        _local_hosts = ('@localhost' , '@127.0.0.1', '@pg-server-transcriptions')
-        if self.conn_string.startswith('postgresql') and any(h in self.conn_string for h in _local_hosts):
-            sync_connect_args['sslmode'] = 'disable'
-        if self.aconn_string.startswith('postgresql') and any(h in self.aconn_string for h in _local_hosts):
-            async_connect_args['ssl'] = False
+        # Local Postgres instances commonly run without SSL; managed providers
+        # (e.g. DigitalOcean) REQUIRE SSL. Decide per-connection so the same code
+        # works locally and in the cluster. 'require' encrypts without forcing CA
+        # verification, which avoids shipping the provider's CA bundle.
+        # NOTE: the connection string must NOT also carry an ?sslmode= query param,
+        # or psycopg2/asyncpg would receive the SSL mode twice and conflict.
+        _local_hosts = ('@localhost', '@127.0.0.1', '@pg-server-transcriptions')
+        if self.conn_string.startswith('postgresql'):
+            if any(h in self.conn_string for h in _local_hosts):
+                sync_connect_args['sslmode'] = 'disable'
+            else:
+                sync_connect_args['sslmode'] = 'require'
+        if self.aconn_string.startswith('postgresql'):
+            if any(h in self.aconn_string for h in _local_hosts):
+                async_connect_args['ssl'] = False
+            else:
+                async_connect_args['ssl'] = 'require'
 
         self.engine = create_engine(
             self.conn_string, 

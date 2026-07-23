@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from app.api_routers.participants.data_model import (
     Participant,
     ParticipantCreate,
     ParticipantUpdate,
 )
+from app.auth.dependencies import get_current_user_id
 from app.repositories.participants.controller import ParticipantsRepository
 
 router = APIRouter(prefix="/participants")
@@ -27,10 +28,12 @@ async def get_participant(participant_id: int):
 
 
 @router.post("/", status_code=201)
-async def create_participant(body: ParticipantCreate):
+async def create_participant(
+    body: ParticipantCreate,
+    current_user_id: int = Depends(get_current_user_id),
+):
     data = body.model_dump()
-    # TODO: replace with actual authenticated user id
-    result = await repository.create(data, user_id=1)
+    result = await repository.create(data, user_id=current_user_id)
     status = result.get("status_code", 500)
     if status >= 400:
         raise HTTPException(status_code=status, detail=result.get("message"))

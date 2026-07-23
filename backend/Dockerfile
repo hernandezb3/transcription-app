@@ -21,6 +21,7 @@ RUN set -eux; \
         ca-certificates \
         curl \
         gnupg \
+        git \
         build-essential \
         libpq-dev \
         unixodbc \

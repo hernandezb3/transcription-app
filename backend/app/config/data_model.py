@@ -54,10 +54,18 @@ class TransactionalDatabase(BaseModel):
 
 class StorageSettings(BaseModel):
   ContainerName: str
-  ConnectionString: str
-  AccountName: str
-  Url: str
-  PoolSize:int
+  # Azure Blob / Azurite fields (optional so an S3/Spaces config also validates)
+  ConnectionString: str = ""
+  AccountName: str = ""
+  Url: str = ""
+  PoolSize: int = 5
+  # DigitalOcean Spaces / S3 fields (optional so an Azure config also validates)
+  Bucket: Optional[str] = None
+  Region: Optional[str] = None
+  Endpoint: Optional[str] = None
+  AccessKey: Optional[str] = None
+  SecretKey: Optional[str] = None
+  PublicBaseUrl: Optional[str] = None
 
 class Storage(BaseModel):
   ServiceProvider: str

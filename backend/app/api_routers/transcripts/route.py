@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
 
 from app.api_routers.transcripts.data_model import (
     Transcript,
     TranscriptCreate,
     TranscriptUpdate,
 )
+from app.auth.dependencies import get_current_user_id
 from app.mappers.activity_log_mapper import ActivityLogMapper
 from app.repositories.transcripts.controller import TranscriptsRepository
 from app.repositories.activity_log.controller import ActivityLogRepository
@@ -34,10 +35,12 @@ async def get_transcript(transcript_id: int):
 
 
 @router.post("/", status_code=201)
-async def create_transcript(body: TranscriptCreate):
+async def create_transcript(
+    body: TranscriptCreate,
+    current_user_id: int = Depends(get_current_user_id),
+):
     data = body.model_dump()
-    # TODO: replace with actual authenticated user id
-    result = await repository.create(data, user_id=1)
+    result = await repository.create(data, user_id=current_user_id)
     status = result.get("status_code", 500)
     if status >= 400:
         raise HTTPException(status_code=status, detail=result.get("message"))
@@ -45,7 +48,11 @@ async def create_transcript(body: TranscriptCreate):
 
 
 @router.put("/{transcript_id}")
-async def update_transcript(transcript_id: int, body: TranscriptUpdate):
+async def update_transcript(
+    transcript_id: int,
+    body: TranscriptUpdate,
+    current_user_id: int = Depends(get_current_user_id),
+):
     updates = body.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -67,7 +74,7 @@ async def update_transcript(transcript_id: int, body: TranscriptUpdate):
                 action="tags_updated",
                 section_id=None,
                 summary=summary,
-                user_id=1,
+                user_id=current_user_id,
             )
             await activity_repo.acreate(log)
     except Exception:
@@ -89,6 +96,7 @@ async def upload_audio_file(
     transcript_id: int,
     audio_file: UploadFile = File(...),
     transcript_file: UploadFile = File(...),
+    current_user_id: int = Depends(get_current_user_id),
 ):
     """
     Upload an audio file together with its transcript text file.
@@ -106,12 +114,11 @@ async def upload_audio_file(
         raise HTTPException(status_code=404, detail="Transcript not found")
 
     try:
-        # TODO: replace with actual authenticated user id
         result = await transcript_service.upload_transcript(
             transcript_id,
             audio_file=audio_file,
             transcript_file=transcript_file,
-            user_id=1,
+            user_id=current_user_id,
         )
         status = result.get("status_code", 500)
         if status >= 400:
