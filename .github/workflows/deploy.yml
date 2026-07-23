@@ -7,16 +7,13 @@ name: Deploy to DOKS
 # kubectl (via doctl) — no separate registry creds or kubeconfig needed.
 
 on:
-  # Auto-deploy on push is DISABLED until the DIGITALOCEAN_ACCESS_TOKEN repo
-  # secret is set (see infra/k8s/README.md). Re-enable by uncommenting the
-  # `push:` block below; until then, deploy manually via "Run workflow".
-  # push:
-  #   branches: [main]
-  #   paths:
-  #     - 'backend/**'
-  #     - 'frontend/**'
-  #     - 'infra/k8s/**'
-  #     - '.github/workflows/deploy.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'infra/k8s/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
     inputs:
       service:
