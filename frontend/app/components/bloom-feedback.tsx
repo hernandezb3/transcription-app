@@ -108,7 +108,7 @@ export default function BloomFeedback() {
       }
       setStatus("sent");
       setText("");
-      setTimeout(() => setOpen(false), 1400);
+      setTimeout(() => setOpen(false), 2000);
     } catch (err) {
       setStatus("error");
       setErrorMsg(err instanceof Error ? err.message : "Something went wrong.");
@@ -166,14 +166,27 @@ export default function BloomFeedback() {
 
         {/* body */}
         <div className="p-4">
-          {status === "sent" ? (
-            <div className="flex flex-col items-center gap-1.5 py-6 text-center">
-              <span className="text-3xl" aria-hidden="true">🙌</span>
+          {status === "sending" ? (
+            <div className="flex flex-col items-center gap-3 py-8 text-center">
+              <span
+                className="h-9 w-9 animate-spin rounded-full border-[3px] border-orange-200 border-t-orange-500 dark:border-zinc-700 dark:border-t-orange-400"
+                aria-hidden="true"
+              />
               <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-                Thanks for your feedback!
+                Sending your feedback…
               </p>
               <p className="text-xs text-zinc-400 dark:text-zinc-500">
-                We&apos;ve shared it with the team.
+                Hang tight — sharing it with the team.
+              </p>
+            </div>
+          ) : status === "sent" ? (
+            <div className="flex flex-col items-center gap-1.5 py-8 text-center">
+              <span className="mb-1 text-4xl" aria-hidden="true">🎉</span>
+              <p className="text-base font-semibold text-zinc-800 dark:text-zinc-100">
+                Thank you for making the app better!
+              </p>
+              <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                We&apos;ve shared your feedback with the team — we read every note.
               </p>
             </div>
           ) : (
@@ -186,10 +199,25 @@ export default function BloomFeedback() {
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                  if (e.key !== "Enter") return;
+                  // Alt+Enter inserts a newline; plain Enter sends. Shift+Enter
+                  // keeps its native newline behavior too.
+                  if (e.altKey) {
                     e.preventDefault();
-                    submit();
+                    const el = e.currentTarget;
+                    const start = el.selectionStart;
+                    const end = el.selectionEnd;
+                    const next = text.slice(0, start) + "\n" + text.slice(end);
+                    setText(next);
+                    // Restore caret just after the inserted newline.
+                    requestAnimationFrame(() => {
+                      el.selectionStart = el.selectionEnd = start + 1;
+                    });
+                    return;
                   }
+                  if (e.shiftKey) return;
+                  e.preventDefault();
+                  submit();
                 }}
                 rows={5}
                 placeholder="What's on your mind about this page?"
@@ -204,15 +232,15 @@ export default function BloomFeedback() {
 
               <div className="mt-3 flex items-center justify-between gap-3">
                 <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
-                  ⌘/Ctrl+Enter to send
+                  Enter to send · Alt+Enter for a new line
                 </span>
                 <button
                   type="button"
                   onClick={submit}
-                  disabled={!text.trim() || status === "sending"}
+                  disabled={!text.trim()}
                   className="cursor-pointer rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-default disabled:opacity-50"
                 >
-                  {status === "sending" ? "Sending…" : "Send feedback"}
+                  Send feedback
                 </button>
               </div>
             </>
