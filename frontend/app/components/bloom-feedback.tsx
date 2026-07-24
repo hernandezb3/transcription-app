@@ -115,13 +115,31 @@ export default function BloomFeedback() {
     }
   }, [text, pathname, user, status]);
 
-  if (!user || !open) return null;
+  if (!user) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-start justify-center bg-black/40 p-4 pt-24"
-      onMouseDown={() => setOpen(false)}
-    >
+    <>
+      {/* Very subtle always-present trigger, bottom-right. Faint until hover. */}
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Send feedback"
+          title="Send feedback"
+          className="fixed bottom-4 right-4 z-40 inline-flex items-center gap-1.5 rounded-full border border-zinc-200/70 bg-white/70 px-3 py-1.5 text-xs font-medium text-zinc-400 opacity-50 shadow-sm backdrop-blur transition-all hover:border-zinc-300 hover:text-zinc-600 hover:opacity-100 dark:border-zinc-700/70 dark:bg-zinc-900/70 dark:text-zinc-500 dark:hover:border-zinc-600 dark:hover:text-zinc-300"
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
+            <path fillRule="evenodd" d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.29.684-.307A41.158 41.158 0 0 0 14.31 10.683C15.287 10.565 16 9.723 16 8.74V4.26c0-.983-.713-1.825-1.69-1.943A41.223 41.223 0 0 0 8 2C5.82 2 3.694 2.12 1.69 2.317 .713 2.435 0 3.277 0 4.26v4.48Z" clipRule="evenodd" />
+          </svg>
+          Feedback
+        </button>
+      )}
+
+      {open && (
+        <div
+          className="fixed inset-0 z-[100] flex items-start justify-center bg-black/40 p-4 pt-24"
+          onMouseDown={() => setOpen(false)}
+        >
       <div
         className="w-full max-w-md overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
         onMouseDown={(e) => e.stopPropagation()}
@@ -201,6 +219,8 @@ export default function BloomFeedback() {
           )}
         </div>
       </div>
-    </div>
+        </div>
+      )}
+    </>
   );
 }
