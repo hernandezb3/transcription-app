@@ -5,8 +5,9 @@ name: SonarQube
 # runs on push to main (and manual dispatch), never on pull_request.
 #
 # This is one repo with two apps, so there are two projects, each scanned from
-# its own subdir: transcription-frontend (frontend/) and transcription-backend
-# (backend/). Each reads its own sonar-project.properties.
+# its own subdir with its own sonar-project.properties:
+#   transcription-frontend (frontend/)  and  transcription-backend (backend/)
+# Each job runs its tests with coverage first, then scans.
 #
 # Requires, on this repo:
 #   secret   SONAR_TOKEN     — a SonarQube Global Analysis Token
@@ -30,6 +31,14 @@ jobs:
         with:
           # Full history so SCM blame / new-code detection works.
           fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install deps + run tests with coverage
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run test:coverage   # vitest --coverage -> coverage/lcov.info
       - name: SonarQube Scan (frontend)
         uses: SonarSource/sonarqube-scan-action@v8
         with:
@@ -45,6 +54,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test deps + run tests with coverage
+        working-directory: backend
+        run: |
+          pip install -r requirements-dev.txt
+          pytest --cov=app --cov-report=xml   # -> coverage.xml
       - name: SonarQube Scan (backend)
         uses: SonarSource/sonarqube-scan-action@v8
         with:

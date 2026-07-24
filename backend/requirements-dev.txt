@@ -1,0 +1,5 @@
+# Dev/test-only dependencies (not installed into the runtime image).
+# Kept minimal so CI test runs stay fast and reliable.
+pytest
+pytest-cov
+pydantic>=2,<3
