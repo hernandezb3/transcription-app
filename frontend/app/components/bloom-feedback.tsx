@@ -29,10 +29,31 @@ export default function BloomFeedback() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Global shortcut: Ctrl/Cmd + Shift + F toggles the panel; Escape closes it.
+  // Ways to open the panel (all hidden from regular users):
+  //  1. Keyboard: Ctrl/Cmd + Shift + F  (may be swallowed by some browsers)
+  //  2. URL hash: add #feedback to the address  (bulletproof fallback)
+  // Escape closes it. A console line on mount confirms the component loaded.
   useEffect(() => {
+    console.info(
+      "[bloom-feedback] ready — press Ctrl/Cmd+Shift+F, or add #feedback to the URL",
+    );
+
+    const openFromHash = () => {
+      if (window.location.hash.toLowerCase() === "#feedback") {
+        setOpen(true);
+        // Clear the hash so closing/reopening behaves normally.
+        window.history.replaceState(
+          null,
+          "",
+          window.location.pathname + window.location.search,
+        );
+      }
+    };
+    openFromHash();
+
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === "KeyF") {
+      const isF = e.code === "KeyF" || e.key === "f" || e.key === "F";
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && isF) {
         e.preventDefault();
         setOpen((v) => !v);
       } else if (e.key === "Escape") {
@@ -40,7 +61,11 @@ export default function BloomFeedback() {
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("hashchange", openFromHash);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("hashchange", openFromHash);
+    };
   }, []);
 
   // Reset transient state and focus the textarea whenever the panel opens.
