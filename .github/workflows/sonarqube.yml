@@ -1,0 +1,54 @@
+name: SonarQube
+
+# Self-hosted SonarQube (Community Build) at https://sonarqube.okeanoslabs.com.
+# Community Build analyzes the MAIN branch only — no PR decoration — so this
+# runs on push to main (and manual dispatch), never on pull_request.
+#
+# This is one repo with two apps, so there are two projects, each scanned from
+# its own subdir: transcription-frontend (frontend/) and transcription-backend
+# (backend/). Each reads its own sonar-project.properties.
+#
+# Requires, on this repo:
+#   secret   SONAR_TOKEN     — a SonarQube Global Analysis Token
+#   variable SONAR_HOST_URL  — https://sonarqube.okeanoslabs.com
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - '.github/workflows/sonarqube.yml'
+  workflow_dispatch:
+
+jobs:
+  frontend:
+    name: Scan frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so SCM blame / new-code detection works.
+          fetch-depth: 0
+      - name: SonarQube Scan (frontend)
+        uses: SonarSource/sonarqube-scan-action@v8
+        with:
+          projectBaseDir: frontend
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+
+  backend:
+    name: Scan backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: SonarQube Scan (backend)
+        uses: SonarSource/sonarqube-scan-action@v8
+        with:
+          projectBaseDir: backend
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
