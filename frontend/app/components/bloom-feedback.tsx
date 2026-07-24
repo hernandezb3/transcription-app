@@ -4,12 +4,20 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 
-type Verdict = "comment" | "needs_changes" | "looks_good";
+type Category = "feature" | "fix" | "chore";
+type Priority = "low" | "medium" | "high" | "critical";
 
-const VERDICT_OPTIONS: { value: Verdict; label: string }[] = [
-  { value: "comment", label: "Comment" },
-  { value: "needs_changes", label: "Needs changes" },
-  { value: "looks_good", label: "Looks good" },
+const CATEGORY_OPTIONS: { value: Category; label: string }[] = [
+  { value: "fix", label: "Bug" },
+  { value: "feature", label: "Feature" },
+  { value: "chore", label: "Chore" },
+];
+
+const PRIORITY_OPTIONS: { value: Priority; label: string }[] = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "critical", label: "Urgent" },
 ];
 
 /**
@@ -24,7 +32,8 @@ export default function BloomFeedback() {
 
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
-  const [verdict, setVerdict] = useState<Verdict>("comment");
+  const [category, setCategory] = useState<Category>("fix");
+  const [priority, setPriority] = useState<Priority>("medium");
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -87,7 +96,8 @@ export default function BloomFeedback() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          verdict,
+          category,
+          priority,
           body,
           context: {
             path: pathname,
@@ -106,7 +116,7 @@ export default function BloomFeedback() {
       setStatus("error");
       setErrorMsg(err instanceof Error ? err.message : "Something went wrong.");
     }
-  }, [text, verdict, pathname, user, status]);
+  }, [text, category, priority, pathname, user, status]);
 
   if (!user || !open) return null;
 
@@ -141,16 +151,36 @@ export default function BloomFeedback() {
 
         {/* body */}
         <div className="p-4">
+          {/* type */}
           <div className="mb-2 flex gap-1.5">
-            {VERDICT_OPTIONS.map((opt) => (
+            {CATEGORY_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
-                onClick={() => setVerdict(opt.value)}
+                onClick={() => setCategory(opt.value)}
                 className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
-                  verdict === opt.value
+                  category === opt.value
                     ? "bg-orange-500 text-white"
                     : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {/* priority */}
+          <div className="mb-2 flex items-center gap-1.5">
+            <span className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500">Priority</span>
+            {PRIORITY_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setPriority(opt.value)}
+                className={`cursor-pointer rounded-md px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                  priority === opt.value
+                    ? "bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900"
+                    : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
                 }`}
               >
                 {opt.label}
@@ -169,7 +199,7 @@ export default function BloomFeedback() {
               }
             }}
             rows={5}
-            placeholder="What's working, what's broken, what to change…"
+            placeholder="Describe the bug, feature, or change — the first line becomes the task title…"
             className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-orange-500/50 dark:focus:ring-orange-500/20"
           />
 
@@ -177,7 +207,7 @@ export default function BloomFeedback() {
 
           <div className="mt-3 flex items-center justify-between gap-3">
             <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
-              Sent to the Bloom worklog · ⌘/Ctrl+Enter
+              Creates a Bloom task · ⌘/Ctrl+Enter
             </span>
             <button
               type="button"
@@ -185,7 +215,7 @@ export default function BloomFeedback() {
               disabled={!text.trim() || status === "sending"}
               className="cursor-pointer rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:brightness-110 active:scale-[0.98] disabled:cursor-default disabled:opacity-50"
             >
-              {status === "sending" ? "Sending…" : status === "sent" ? "Sent ✓" : "Send"}
+              {status === "sending" ? "Creating…" : status === "sent" ? "Created ✓" : "Create task"}
             </button>
           </div>
         </div>
