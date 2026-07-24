@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { settings } from "@/lib/settings";
 import { useAuth } from "@/lib/auth-context";
 import NotificationPanel from "@/app/components/notification-panel";
+import BloomFeedback from "@/app/components/bloom-feedback";
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -160,6 +161,8 @@ export default function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      {/* Hidden Bloom feedback panel — opens only via Ctrl/Cmd+Shift+F */}
+      <BloomFeedback />
       <header className="sticky top-0 z-30 h-16 bg-white dark:bg-zinc-900">
         <div className="flex h-full items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-3">

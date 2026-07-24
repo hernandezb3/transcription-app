@@ -36,6 +36,16 @@ spec:
             # The browser never sees this; all backend calls are proxied by Next.js.
             - name: API_BASE_URL
               value: http://transcription-api
+            # Optional Bloom worklog API key for the in-app feedback relay
+            # (app/api/bloom-feedback). optional:true so the UI still starts if
+            # the secret/key is absent — the relay then posts unauthenticated,
+            # which Bloom accepts today (network-trust).
+            - name: BLOOM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: transcription-ui-settings
+                  key: bloom_api_key
+                  optional: true
           readinessProbe:
             tcpSocket:
               port: 3000
