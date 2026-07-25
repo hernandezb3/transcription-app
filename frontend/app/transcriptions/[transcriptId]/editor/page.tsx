@@ -42,6 +42,20 @@ export default function TranscriptEditorPage() {
   const [savingId, setSavingId] = useState<number | null>(null);
   const [addingSectionAtPosition, setAddingSectionAtPosition] = useState<number | null>(null);
   const [pendingDeleteSectionId, setPendingDeleteSectionId] = useState<number | null>(null);
+  // Transient, in-app error toast. Replaces native alert() for save/add/delete
+  // failures — Firefox lets users suppress repeated native dialogs, which makes
+  // alert() silently no-op so errors would just vanish (same failure mode that
+  // hid the section-delete confirm()). This toast can never be suppressed.
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 5000);
+  }, []);
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  }, []);
 
   /* ---------- Audio player state ---------- */
 
@@ -284,7 +298,7 @@ export default function TranscriptEditorPage() {
         prev.map((s) => (s.speaker_id === speakerId ? { ...s, speaker: newName } : s))
       );
     } catch {
-      alert("Failed to save speaker name – please try again.");
+      showToast("Failed to save speaker name – please try again.");
     } finally {
       setSavingId(null);
     }
@@ -311,7 +325,7 @@ export default function TranscriptEditorPage() {
       // Refresh recent edits in background if panel is open
       if (showEditorActivity) fetchRecentEdits(true);
     } catch {
-      alert("Failed to save – please try again.");
+      showToast("Failed to save – please try again.");
     } finally {
       setSavingId(null);
     }
@@ -334,7 +348,7 @@ export default function TranscriptEditorPage() {
       await fetchSpeakers();
       if (showEditorActivity) fetchRecentEdits(true);
     } catch {
-      alert("Failed to save speaker – please try again.");
+      showToast("Failed to save speaker – please try again.");
     } finally {
       setSavingId(null);
     }
@@ -353,7 +367,7 @@ export default function TranscriptEditorPage() {
         prev.map((s) => (s.id === sectionDbId ? { ...s, tags } : s))
       );
     } catch {
-      alert("Failed to save – please try again.");
+      showToast("Failed to save – please try again.");
     } finally {
       setSavingId(null);
     }
@@ -402,7 +416,7 @@ export default function TranscriptEditorPage() {
       await fetchSections();
       await fetchSpeakers();
     } catch {
-      alert("Failed to add section \u2013 please try again.");
+      showToast("Failed to add section \u2013 please try again.");
     } finally {
       setAddingSectionAtPosition(null);
     }
@@ -421,7 +435,7 @@ export default function TranscriptEditorPage() {
       setPendingDeleteSectionId(null);
       await fetchSections();
     } catch {
-      alert("Failed to delete section \u2013 please try again.");
+      showToast("Failed to delete section \u2013 please try again.");
     } finally {
       setSavingId(null);
     }
@@ -1403,6 +1417,31 @@ export default function TranscriptEditorPage() {
           </div>
         );
       })()}
+
+      {/* ── Transient error toast (in-app, cannot be browser-suppressed) ── */}
+      {toast && (
+        <div className="pointer-events-none fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 px-4">
+          <div
+            role="alert"
+            className="pointer-events-auto flex items-center gap-2.5 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-red-600/30"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4 flex-shrink-0">
+              <path fillRule="evenodd" d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003ZM12 8.25a.75.75 0 0 1 .75.75v3.75a.75.75 0 0 1-1.5 0V9a.75.75 0 0 1 .75-.75Zm0 8.25a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z" clipRule="evenodd" />
+            </svg>
+            <span>{toast}</span>
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              aria-label="Dismiss"
+              className="cursor-pointer -mr-1 ml-1 rounded p-0.5 text-white/80 transition hover:bg-white/20 hover:text-white"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
