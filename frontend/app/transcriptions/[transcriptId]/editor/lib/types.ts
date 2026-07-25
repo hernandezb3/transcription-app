@@ -26,6 +26,7 @@ export type TranscriptComment = {
   section_id: number | null;
   comment: string | null;
   created_by: number | null;
+  created_by_name: string | null;
   created_at: string | null;
   is_active: number;
 };

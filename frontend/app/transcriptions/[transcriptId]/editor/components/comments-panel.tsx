@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import type { TranscriptComment } from "../lib/types";
-import { getCommenterColor, relativeTime } from "../lib/helpers";
+import { getCommenterColor, relativeTime, commenterLabel, commenterInitials } from "../lib/helpers";
 import InlineCommentInput from "./inline-comment-input";
 
 /* ── Helpers ── */
@@ -283,12 +283,12 @@ export default function CommentsPanel({
                           className="flex items-start gap-2.5 rounded-xl px-2 py-2 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer"
                         >
                           <div className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[8px] font-bold ring-1 mt-0.5 ${cColor.bg} ${cColor.text} ${cColor.ring}`}>
-                            U{c.created_by ?? "?"}
+                            {commenterInitials(c.created_by_name, c.created_by)}
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-                                User {c.created_by ?? "?"}
+                                {commenterLabel(c.created_by_name, c.created_by)}
                               </span>
                               <span className="text-[9px] text-zinc-400 dark:text-zinc-500">{relativeTime(c.created_at)}</span>
                             </div>
@@ -308,7 +308,7 @@ export default function CommentsPanel({
                         transcriptId={transcriptId}
                         sectionId={sec.section_id}
                         onCommentAdded={onCommentAdded}
-                        autoFocus={sectionComments.length === 0}
+                        autoFocus={isActive && !normalizedQuery}
                       />
                     </div>
                   </div>

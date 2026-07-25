@@ -113,6 +113,30 @@ export function getCommenterColor(userId: number | null): typeof COMMENTER_COLOR
   return COMMENTER_COLORS[(userId - 1) % COMMENTER_COLORS.length];
 }
 
+/** Human label for a commenter: their display name, else "User {id}", else "Unknown". */
+export function commenterLabel(name: string | null, userId: number | null): string {
+  const trimmed = name?.trim();
+  if (trimmed) return trimmed;
+  if (userId != null) return `User ${userId}`;
+  return "Unknown";
+}
+
+/** Avatar initials: from the display name when present, else "U{id}", else "?". */
+export function commenterInitials(name: string | null, userId: number | null): string {
+  const trimmed = name?.trim();
+  if (trimmed) {
+    return trimmed
+      .split(/[\s_-]+/)
+      .filter(Boolean)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  }
+  if (userId != null) return `U${userId}`;
+  return "?";
+}
+
 export function relativeTime(dateStr: string | null): string {
   if (!dateStr) return "";
   const now = Date.now();

@@ -2,6 +2,7 @@ import sqlalchemy
 
 from app.infrastructure.databases.factory import DatabaseFactory
 from app.db_models.transcription.transcription import TranscriptDetailsCommentsT
+from app.db_models.user import UsersT
 from app.data_models.transcript_details_comments import TranscriptDetailsCommentsCreate
 from app.mappers.transcript_details_comments import TranscriptDetailsCommentsMapper
 
@@ -11,29 +12,39 @@ class TranscriptDetailsCommentsRepository:
         self.mapper = TranscriptDetailsCommentsMapper()
 
     async def alist(self, transcript_id: int):
-        query = sqlalchemy.select(
-            TranscriptDetailsCommentsT.id,
-            TranscriptDetailsCommentsT.transcription_id,
-            TranscriptDetailsCommentsT.section_id,
-            TranscriptDetailsCommentsT.comment,
-            TranscriptDetailsCommentsT.created_by,
-            TranscriptDetailsCommentsT.created_at,
-            TranscriptDetailsCommentsT.is_active
-        ).where(TranscriptDetailsCommentsT.transcription_id == transcript_id)
+        query = (
+            sqlalchemy.select(
+                TranscriptDetailsCommentsT.id,
+                TranscriptDetailsCommentsT.transcription_id,
+                TranscriptDetailsCommentsT.section_id,
+                TranscriptDetailsCommentsT.comment,
+                TranscriptDetailsCommentsT.created_by,
+                UsersT.display_name.label("created_by_name"),
+                TranscriptDetailsCommentsT.created_at,
+                TranscriptDetailsCommentsT.is_active,
+            )
+            .outerjoin(UsersT, TranscriptDetailsCommentsT.created_by == UsersT.id)
+            .where(TranscriptDetailsCommentsT.transcription_id == transcript_id)
+        )
         result = await self.database.aread(query)
         mapped_data = self.mapper.to_list_values(result.get("data", []))
         return mapped_data
     
     async def aget(self, comment_id: int):
-        query = sqlalchemy.select(
-            TranscriptDetailsCommentsT.id,
-            TranscriptDetailsCommentsT.transcription_id,
-            TranscriptDetailsCommentsT.section_id,
-            TranscriptDetailsCommentsT.comment,
-            TranscriptDetailsCommentsT.created_by,
-            TranscriptDetailsCommentsT.created_at,
-            TranscriptDetailsCommentsT.is_active
-        ).where(TranscriptDetailsCommentsT.id == comment_id)
+        query = (
+            sqlalchemy.select(
+                TranscriptDetailsCommentsT.id,
+                TranscriptDetailsCommentsT.transcription_id,
+                TranscriptDetailsCommentsT.section_id,
+                TranscriptDetailsCommentsT.comment,
+                TranscriptDetailsCommentsT.created_by,
+                UsersT.display_name.label("created_by_name"),
+                TranscriptDetailsCommentsT.created_at,
+                TranscriptDetailsCommentsT.is_active,
+            )
+            .outerjoin(UsersT, TranscriptDetailsCommentsT.created_by == UsersT.id)
+            .where(TranscriptDetailsCommentsT.id == comment_id)
+        )
         result = await self.database.aread(query)
         mapped_data = self.mapper.to_list_values(result.get("data", []))
         mapped_data = mapped_data[0] if mapped_data else None

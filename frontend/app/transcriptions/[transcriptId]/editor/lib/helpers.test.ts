@@ -7,6 +7,8 @@ import {
   formatSecondsToTime,
   countOccurrences,
   getSpeakerInitials,
+  commenterLabel,
+  commenterInitials,
 } from "./helpers";
 
 describe("timestampToSeconds", () => {
@@ -43,4 +45,18 @@ describe("getSpeakerInitials", () => {
   it("returns ? for null", () => expect(getSpeakerInitials(null)).toBe("?"));
   it("uses the first letter of the first two words", () => expect(getSpeakerInitials("Student A")).toBe("SA"));
   it("handles a single-word name", () => expect(getSpeakerInitials("Teacher")).toBe("T"));
+});
+
+describe("commenterLabel", () => {
+  it("prefers the display name", () => expect(commenterLabel("Bryan Hernandez", 1)).toBe("Bryan Hernandez"));
+  it("falls back to User {id} when name is blank", () => expect(commenterLabel("  ", 5)).toBe("User 5"));
+  it("falls back to User {id} when name is null", () => expect(commenterLabel(null, 5)).toBe("User 5"));
+  it("returns Unknown with neither name nor id", () => expect(commenterLabel(null, null)).toBe("Unknown"));
+});
+
+describe("commenterInitials", () => {
+  it("derives initials from the display name", () => expect(commenterInitials("Bryan Hernandez", 1)).toBe("BH"));
+  it("handles a single-word name", () => expect(commenterInitials("Bryan", 1)).toBe("B"));
+  it("falls back to U{id} when name is missing", () => expect(commenterInitials(null, 7)).toBe("U7"));
+  it("returns ? with neither name nor id", () => expect(commenterInitials(null, null)).toBe("?"));
 });

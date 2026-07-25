@@ -28,6 +28,7 @@ class TranscriptDetailsComments(BaseModel):
     section_id: Optional[int] = None
     comment: Optional[str] = None
     created_by: Optional[int] = None
+    created_by_name: Optional[str] = None
     created_at: Optional[str] = None
     is_active: Optional[int] = 1
 
