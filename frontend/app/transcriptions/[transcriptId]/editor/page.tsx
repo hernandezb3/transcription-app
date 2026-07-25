@@ -41,6 +41,7 @@ export default function TranscriptEditorPage() {
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [addingSectionAtPosition, setAddingSectionAtPosition] = useState<number | null>(null);
+  const [pendingDeleteSectionId, setPendingDeleteSectionId] = useState<number | null>(null);
 
   /* ---------- Audio player state ---------- */
 
@@ -407,14 +408,17 @@ export default function TranscriptEditorPage() {
     }
   };
 
+  // NOTE: confirmation is handled by an in-app modal (see pendingDeleteSectionId),
+  // NOT the browser-native confirm() \u2014 Firefox lets users suppress repeated native
+  // dialogs, which silently blocked deletes and made this look permanently broken.
   const deleteSection = async (sectionDbId: number) => {
-    if (!confirm("Delete this section? This cannot be undone.")) return;
     setSavingId(sectionDbId);
     try {
       const res = await fetch(`/api/transcriptions/sections/${sectionDbId}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to delete section");
+      setPendingDeleteSectionId(null);
       await fetchSections();
     } catch {
       alert("Failed to delete section \u2013 please try again.");
@@ -1256,7 +1260,7 @@ export default function TranscriptEditorPage() {
                       </button>
 
                       {/* Delete section icon */}
-                      <button type="button" onClick={() => deleteSection(section.id)} className="cursor-pointer relative rounded-lg p-2 transition-all text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:text-zinc-500 dark:hover:bg-red-500/10 dark:hover:text-red-400" title="Delete section">
+                      <button type="button" onClick={() => setPendingDeleteSectionId(section.id)} className="cursor-pointer relative rounded-lg p-2 transition-all text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:text-zinc-500 dark:hover:bg-red-500/10 dark:hover:text-red-400" title="Delete section">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4"><path fillRule="evenodd" d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5ZM6.05 6a.75.75 0 0 1 .787.713l.275 5.5a.75.75 0 0 1-1.498.075l-.275-5.5A.75.75 0 0 1 6.05 6Zm3.9 0a.75.75 0 0 1 .712.787l-.275 5.5a.75.75 0 0 1-1.498-.075l.275-5.5A.75.75 0 0 1 9.95 6Z" clipRule="evenodd" /></svg>
                       </button>
 
@@ -1348,6 +1352,56 @@ export default function TranscriptEditorPage() {
         const sec = sections.find((s) => s.id === diffSectionId);
         if (!sec) return null;
         return <DiffModal section={sec} onClose={() => setDiffSectionId(null)} onSave={(v) => saveField(sec.id, "edited_text", v)} />;
+      })()}
+
+      {/* ── Delete-section confirmation modal ── */}
+      {pendingDeleteSectionId !== null && (() => {
+        const sec = sections.find((s) => s.id === pendingDeleteSectionId);
+        const isDeleting = savingId === pendingDeleteSectionId;
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+            onClick={() => { if (!isDeleting) setPendingDeleteSectionId(null); }}
+          >
+            <div
+              className="w-full max-w-sm overflow-hidden rounded-lg bg-white shadow-xl dark:bg-zinc-900"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="bg-red-600 px-5 py-3">
+                <h3 className="text-center text-lg font-semibold text-white">Delete Section</h3>
+              </div>
+              <div className="space-y-3 p-5">
+                <p className="text-sm text-zinc-700 dark:text-zinc-300">
+                  Are you sure you want to delete{" "}
+                  <span className="font-semibold">
+                    {sec ? `Section #${sec.section_id}` : "this section"}
+                  </span>?
+                </p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  This removes the section and its text. This action cannot be undone.
+                </p>
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteSectionId(null)}
+                    disabled={isDeleting}
+                    className="cursor-pointer rounded border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteSection(pendingDeleteSectionId)}
+                    disabled={isDeleting}
+                    className="cursor-pointer rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isDeleting ? "Deleting…" : "Delete"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
       })()}
     </section>
   );
