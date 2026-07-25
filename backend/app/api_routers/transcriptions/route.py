@@ -197,8 +197,14 @@ async def delete_section(
     if status >= 400:
         raise HTTPException(status_code=status, detail=result.get("message"))
 
-    # Re-compact section_ids so there are no gaps
-    await repository.acompact_section_ids(transcript_id)
+    # Re-compact section_ids so there are no gaps. Best-effort: the soft-delete
+    # above is already committed, so a hiccup while renumbering must NOT surface
+    # as a 500 — that would make a delete that actually succeeded look broken to
+    # the client (which then leaves the stale row on screen and re-tries).
+    try:
+        await repository.acompact_section_ids(transcript_id)
+    except Exception:
+        pass
 
     # Log activity
     try:
