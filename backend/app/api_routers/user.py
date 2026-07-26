@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Header, Query
+from fastapi import APIRouter, Header, HTTPException, Query, status
 from typing import Optional
 import math
 
-from app.data_models.user import UserCreate, UserUpdate
+from app.data_models.user import UserCreate, UserUpdate, PasswordUpdate
 from app.repositories.user.controller import UserRepository
 
 router = APIRouter(prefix="/users")
+
+MIN_PASSWORD_LENGTH = 8
 
 
 @router.get("/search")
@@ -44,6 +46,19 @@ async def get_user_permissions(user_id: int):
 async def update_user(user: UserUpdate,user_id: int):
     result = await UserRepository().update_user(user,user_id)
     return result
+
+@router.post("/{user_id}/reset-password")
+async def reset_password(user_id: int, payload: PasswordUpdate):
+    """Admin-set / reset a user's sign-in password."""
+    password = (payload.password or "").strip()
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Password must be at least {MIN_PASSWORD_LENGTH} characters.",
+        )
+
+    result = await UserRepository().set_password(user_id, password)
+    return {"ok": True}
 
 @router.delete("/{user_id}")
 async def delete_user(user_id: int):

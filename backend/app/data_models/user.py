@@ -27,6 +27,11 @@ class UserLogin(BaseModel):
     user_name: str
     password: str
 
+class PasswordUpdate(BaseModel):
+    """Admin-set / reset of a user's sign-in password."""
+    password: str
+    model_config = ConfigDict(from_attributes=True)
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

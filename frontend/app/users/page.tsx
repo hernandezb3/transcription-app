@@ -27,6 +27,7 @@ type PaginatedUsersResponse = {
 type CreateUserPayload = {
   user_name: string;
   user_email: string;
+  password: string;
   first_name: string;
   last_name: string;
   display_name: string;
@@ -34,6 +35,7 @@ type CreateUserPayload = {
 };
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
+const MIN_PASSWORD_LENGTH = 8;
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -48,14 +50,21 @@ export default function UsersPage() {
   const [pageInputValue, setPageInputValue] = useState("1");
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState<CreateUserPayload>({
     user_name: "",
     user_email: "",
+    password: "",
     first_name: "",
     last_name: "",
     display_name: "",
     active: 1,
   });
+  const [pendingResetUser, setPendingResetUser] = useState<User | null>(null);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetSuccessUser, setResetSuccessUser] = useState<string | null>(null);
+  const [resetForm, setResetForm] = useState({ password: "", confirm: "" });
 
   const loadUsers = async (page: number, limit: number, showLoading = true) => {
     if (showLoading) {
@@ -97,6 +106,14 @@ export default function UsersPage() {
     setPageInputValue(String(currentPage));
   }, [currentPage]);
 
+  useEffect(() => {
+    if (!resetSuccessUser) {
+      return;
+    }
+    const timer = setTimeout(() => setResetSuccessUser(null), 4000);
+    return () => clearTimeout(timer);
+  }, [resetSuccessUser]);
+
   const goToTypedPage = () => {
     const parsedPage = Number(pageInputValue);
     if (!Number.isFinite(parsedPage)) {
@@ -135,15 +152,40 @@ export default function UsersPage() {
     }
   };
 
+  const resetCreateForm = () => {
+    setCreateForm({
+      user_name: "",
+      user_email: "",
+      password: "",
+      first_name: "",
+      last_name: "",
+      display_name: "",
+      active: 1,
+    });
+    setCreateError(null);
+  };
+
   const handleCreateUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setCreateError(null);
+
+    const userName = createForm.user_name.trim();
+    if (!userName) {
+      setCreateError("Username is required.");
+      return;
+    }
+    if (createForm.password.length < MIN_PASSWORD_LENGTH) {
+      setCreateError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
+
     setError(null);
     setIsCreatingUser(true);
 
     try {
       const payload = {
         ...createForm,
-        user_name: createForm.user_name.trim(),
+        user_name: userName,
         user_email: createForm.user_email.trim(),
         first_name: createForm.first_name.trim(),
         last_name: createForm.last_name.trim(),
@@ -163,20 +205,65 @@ export default function UsersPage() {
       }
 
       setIsAddUserOpen(false);
-      setCreateForm({
-        user_name: "",
-        user_email: "",
-        first_name: "",
-        last_name: "",
-        display_name: "",
-        active: 1,
-      });
+      resetCreateForm();
 
       await loadUsers(currentPage, pageSize, false);
     } catch {
-      setError("Could not create user.");
+      setCreateError("Could not create user.");
     } finally {
       setIsCreatingUser(false);
+    }
+  };
+
+  const closeResetModal = () => {
+    setPendingResetUser(null);
+    setResetForm({ password: "", confirm: "" });
+    setResetError(null);
+  };
+
+  const handleResetPassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!pendingResetUser) {
+      return;
+    }
+
+    setResetError(null);
+
+    if (resetForm.password.length < MIN_PASSWORD_LENGTH) {
+      setResetError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
+    if (resetForm.password !== resetForm.confirm) {
+      setResetError("Passwords do not match.");
+      return;
+    }
+
+    const targetName =
+      pendingResetUser.display_name ??
+      pendingResetUser.user_name ??
+      `#${pendingResetUser.id}`;
+
+    setIsResettingPassword(true);
+
+    try {
+      const response = await fetch(`/api/users/${pendingResetUser.id}/reset-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ password: resetForm.password }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to reset password");
+      }
+
+      closeResetModal();
+      setResetSuccessUser(targetName);
+    } catch {
+      setResetError("Could not reset password. Please try again.");
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
@@ -193,7 +280,10 @@ export default function UsersPage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setIsAddUserOpen(true)}
+            onClick={() => {
+              resetCreateForm();
+              setIsAddUserOpen(true);
+            }}
             className="cursor-pointer rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700"
           >
             Add User
@@ -204,6 +294,19 @@ export default function UsersPage() {
       {loading && <p className="text-sm text-zinc-500">Loading…</p>}
       {error && (
         <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+      )}
+      {resetSuccessUser && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-800 dark:bg-green-900/40 dark:text-green-200">
+          <span>🔑 Password updated for “{resetSuccessUser}”.</span>
+          <button
+            type="button"
+            onClick={() => setResetSuccessUser(null)}
+            aria-label="Dismiss"
+            className="cursor-pointer rounded px-1 text-green-700 hover:text-green-900 dark:text-green-300 dark:hover:text-green-100"
+          >
+            ✕
+          </button>
+        </div>
       )}
 
       {!loading && !error && users.length === 0 && (
@@ -266,16 +369,31 @@ export default function UsersPage() {
                         : "—"}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2">
-                      <button
-                        type="button"
-                        onClick={() => setPendingDeleteUser(user)}
-                        disabled={deletingUserId === user.id}
-                        aria-label="Delete user"
-                        title="Delete user"
-                        className="cursor-pointer rounded px-2 py-1 text-base text-zinc-500 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {deletingUserId === user.id ? "…" : "🗑️"}
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResetError(null);
+                            setResetForm({ password: "", confirm: "" });
+                            setPendingResetUser(user);
+                          }}
+                          aria-label="Reset password"
+                          title="Reset password"
+                          className="cursor-pointer rounded px-2 py-1 text-base text-zinc-500 hover:text-sky-600 dark:text-zinc-400 dark:hover:text-sky-400"
+                        >
+                          🔑
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPendingDeleteUser(user)}
+                          disabled={deletingUserId === user.id}
+                          aria-label="Delete user"
+                          title="Delete user"
+                          className="cursor-pointer rounded px-2 py-1 text-base text-zinc-500 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {deletingUserId === user.id ? "…" : "🗑️"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -399,9 +517,9 @@ export default function UsersPage() {
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
                 Are you sure you want to delete the user{" "}
                 <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                  "
+                  &ldquo;
                   {pendingDeleteUser.display_name ?? pendingDeleteUser.user_name ?? `#${pendingDeleteUser.id}`}
-                  "
+                  &rdquo;
                 </span>
                 ?
               </p>
@@ -436,7 +554,10 @@ export default function UsersPage() {
               <h3 className="text-center text-lg font-semibold text-white">Add User</h3>
               <button
                 type="button"
-                onClick={() => setIsAddUserOpen(false)}
+                onClick={() => {
+                  setIsAddUserOpen(false);
+                  resetCreateForm();
+                }}
                 disabled={isCreatingUser}
                 aria-label="Close add user dialog"
                 className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-white/35 bg-white/15 text-sm leading-none text-white/95 backdrop-blur-sm transition hover:bg-white/25 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/60 disabled:cursor-not-allowed disabled:opacity-60"
@@ -483,6 +604,21 @@ export default function UsersPage() {
                   />
                 </label>
 
+                <label className="space-y-1 text-sm sm:col-span-2">
+                  <span className="text-zinc-600 dark:text-zinc-300">
+                    Password <span className="text-zinc-400">(min {MIN_PASSWORD_LENGTH} characters — the user signs in with this)</span>
+                  </span>
+                  <input
+                    type="password"
+                    value={createForm.password}
+                    autoComplete="new-password"
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, password: event.target.value }))
+                    }
+                    className="w-full rounded border border-zinc-300 px-2.5 py-2 text-zinc-800 focus:border-sky-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                  />
+                </label>
+
                 <label className="space-y-1 text-sm">
                   <span className="text-zinc-600 dark:text-zinc-300">First Name</span>
                   <input
@@ -520,10 +656,17 @@ export default function UsersPage() {
                 </label>
               </div>
 
+              {createError && (
+                <p className="text-sm text-red-600 dark:text-red-400">{createError}</p>
+              )}
+
               <div className="flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsAddUserOpen(false)}
+                  onClick={() => {
+                    setIsAddUserOpen(false);
+                    resetCreateForm();
+                  }}
                   disabled={isCreatingUser}
                   className="cursor-pointer rounded border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
@@ -535,6 +678,86 @@ export default function UsersPage() {
                   className="cursor-pointer rounded bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isCreatingUser ? "Saving..." : "Create User"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {pendingResetUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-xl dark:bg-zinc-900">
+            <div className="relative bg-gradient-to-r from-sky-600 to-cyan-600 px-5 py-3">
+              <h3 className="text-center text-lg font-semibold text-white">Reset Password</h3>
+              <button
+                type="button"
+                onClick={closeResetModal}
+                disabled={isResettingPassword}
+                aria-label="Close reset password dialog"
+                className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-white/35 bg-white/15 text-sm leading-none text-white/95 backdrop-blur-sm transition hover:bg-white/25 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/60 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleResetPassword} className="space-y-4 p-5">
+              <p className="text-sm text-zinc-600 dark:text-zinc-300">
+                Set a new sign-in password for{" "}
+                <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                  “{pendingResetUser.display_name ?? pendingResetUser.user_name ?? `#${pendingResetUser.id}`}”
+                </span>
+                .
+              </p>
+
+              <label className="space-y-1 text-sm block">
+                <span className="text-zinc-600 dark:text-zinc-300">
+                  New Password <span className="text-zinc-400">(min {MIN_PASSWORD_LENGTH} characters)</span>
+                </span>
+                <input
+                  type="password"
+                  value={resetForm.password}
+                  autoComplete="new-password"
+                  autoFocus
+                  onChange={(event) =>
+                    setResetForm((current) => ({ ...current, password: event.target.value }))
+                  }
+                  className="w-full rounded border border-zinc-300 px-2.5 py-2 text-zinc-800 focus:border-sky-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                />
+              </label>
+
+              <label className="space-y-1 text-sm block">
+                <span className="text-zinc-600 dark:text-zinc-300">Confirm Password</span>
+                <input
+                  type="password"
+                  value={resetForm.confirm}
+                  autoComplete="new-password"
+                  onChange={(event) =>
+                    setResetForm((current) => ({ ...current, confirm: event.target.value }))
+                  }
+                  className="w-full rounded border border-zinc-300 px-2.5 py-2 text-zinc-800 focus:border-sky-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                />
+              </label>
+
+              {resetError && (
+                <p className="text-sm text-red-600 dark:text-red-400">{resetError}</p>
+              )}
+
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeResetModal}
+                  disabled={isResettingPassword}
+                  className="cursor-pointer rounded border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isResettingPassword}
+                  className="cursor-pointer rounded bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isResettingPassword ? "Saving..." : "Reset Password"}
                 </button>
               </div>
             </form>

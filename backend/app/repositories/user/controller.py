@@ -11,6 +11,7 @@ from app.db_models.security.role_permissions import RolePermissionsT
 from app.db_models.security.permissions import PermissionsT
 from app.data_models.user import UserCreate, UserUpdate
 from app.mappers.user_mapper import UserMapper
+from app.auth.security import hash_password
 
 class UserRepository:
     def __init__(self):
@@ -153,55 +154,16 @@ class UserRepository:
         result = await self.database.adelete(stmt)
         return result
 
-        query = sqlalchemy.select(
-            UsersT.id, 
-            UsersT.unique_id, 
-            UsersT.user_name,
-            UsersT.user_email,
-            UsersT.display_name, 
-            UsersT.first_name, 
-            UsersT.last_name,
-            UsersT.active,
-            UsersT.created,
-            UsersT.modified
-        ).order_by(UsersT.id.asc()).limit(limit).offset(offset)
-        result = await self.database.aread(query)
-        return result
-
-    async def count_users(self):
-        query = sqlalchemy.select(sqlalchemy.func.count(UsersT.id).label("total"))
-        result = await self.database.aread(query)
-        return result
-
-    async def aget_user(self, user_id: int):
-        query = sqlalchemy.select(
-            UsersT.id, 
-            UsersT.unique_id, 
-            UsersT.user_name, 
-            UsersT.user_email,
-            UsersT.display_name, 
-            UsersT.first_name, 
-            UsersT.last_name,
-            UsersT.created
-
-        ).where(UsersT.id == user_id)
-        result = await self.database.aread(query)
-
-        return result
-    
-    async def create_user(self, user: UserCreate):
-        user_data = UserMapper.to_create_values(user)
-        stmt = sqlalchemy.insert(UsersT).values(user_data)
-        result = await self.database.acreate(stmt)
-        return result
-    
-    async def update_user(self, user: UserUpdate,user_id: int):
-        user_data = UserMapper.to_update_values(user)
-        stmt = sqlalchemy.update(UsersT).where(UsersT.id == user_id).values(user_data)
+    async def set_password(self, user_id: int, plain_password: str, modified_by: int = 1):
+        """Admin-set / reset a user's sign-in password (bcrypt-hashed)."""
+        stmt = (
+            sqlalchemy.update(UsersT)
+            .where(UsersT.id == user_id)
+            .values(
+                password_hash=hash_password(plain_password),
+                modified=UserMapper._utc_now_naive(),
+                modified_by=modified_by,
+            )
+        )
         result = await self.database.aupdate(stmt)
-        return result
-    
-    async def delete_user(self, user_id: int):
-        stmt = sqlalchemy.delete(UsersT).where(UsersT.id == user_id)
-        result = await self.database.adelete(stmt)
         return result

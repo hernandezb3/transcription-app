@@ -1,0 +1,33 @@
+import { ApiClientError, fastApiClient } from "@/lib/api-client";
+import { NextResponse } from "next/server";
+
+type RouteContext = {
+  params: Promise<{ userId: string }>;
+};
+
+export async function POST(request: Request, context: RouteContext) {
+  const { userId } = await context.params;
+
+  if (!userId || Number.isNaN(Number(userId))) {
+    return NextResponse.json({ error: "Invalid user id" }, { status: 400 });
+  }
+
+  let body: unknown;
+
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  try {
+    const data = await fastApiClient.post(`/users/${userId}/reset-password`, body);
+    return NextResponse.json(data);
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
+    return NextResponse.json({ error: "Unexpected server error" }, { status: 500 });
+  }
+}
