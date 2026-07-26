@@ -6,47 +6,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { settings } from "@/lib/settings";
 import { useAuth } from "@/lib/auth-context";
+import { navEntries, allNavLinks, isGroup, filterNavEntries } from "@/lib/nav";
+import type { NavEntry } from "@/lib/nav";
 import NotificationPanel from "@/app/components/notification-panel";
 import BloomFeedback from "@/app/components/bloom-feedback";
 
 type AppShellProps = {
   children: React.ReactNode;
 };
-
-type NavLink = { label: string; href: string; requiredPermission?: string };
-type NavGroup = { label: string; children: NavLink[] };
-type NavEntry = NavLink | NavGroup;
-
-function isGroup(entry: NavEntry): entry is NavGroup {
-  return "children" in entry;
-}
-
-const navEntries: NavEntry[] = [
-  {
-    label: "Research",
-    children: [
-      { label: "Participants", href: "/participants", requiredPermission: "participants.read" },
-    ],
-  },
-  {
-    label: "Administration",
-    children: [
-      { label: "Lesson Subjects", href: "/metadata/lesson-subjects", requiredPermission: "settings.read" },
-      { label: "Microphone Colors", href: "/metadata", requiredPermission: "settings.read" },
-    ],
-  },
-  {
-    label: "Security",
-    children: [
-      { label: "Roles & Permissions", href: "/admin", requiredPermission: "roles.read" },
-    ],
-  },
-];
-
-/* flat list used for breadcrumb / page-title resolution */
-const allNavLinks: NavLink[] = navEntries.flatMap((e) =>
-  isGroup(e) ? e.children : [e],
-);
 
 const appName = settings.app?.name ?? "Project Focus";
 const defaultPageTitle = settings.app?.defaultPageTitle ?? "Landing Page";
@@ -55,17 +22,7 @@ export default function AppShell({ children }: AppShellProps) {
   const { user, logout, isLoading, hasPermission } = useAuth();
 
   /* ---- filter nav entries by the user's permissions ---- */
-  const filteredNavEntries = navEntries
-    .map((entry) => {
-      if (isGroup(entry)) {
-        const visibleChildren = entry.children.filter(
-          (child) => !child.requiredPermission || hasPermission(child.requiredPermission),
-        );
-        return visibleChildren.length > 0 ? { ...entry, children: visibleChildren } : null;
-      }
-      return !entry.requiredPermission || hasPermission(entry.requiredPermission) ? entry : null;
-    })
-    .filter(Boolean) as NavEntry[];
+  const filteredNavEntries: NavEntry[] = filterNavEntries(navEntries, hasPermission);
   const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
