@@ -21,6 +21,7 @@ class UserUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     display_name: Optional[str] = None
+    active: Optional[int] = None
     model_config = ConfigDict(from_attributes=True)
 
 class UserLogin(BaseModel):

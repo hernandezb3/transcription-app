@@ -65,6 +65,17 @@ export default function UsersPage() {
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetSuccessUser, setResetSuccessUser] = useState<string | null>(null);
   const [resetForm, setResetForm] = useState({ password: "", confirm: "" });
+  const [pendingEditUser, setPendingEditUser] = useState<User | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSuccessUser, setEditSuccessUser] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    first_name: "",
+    last_name: "",
+    display_name: "",
+    user_email: "",
+    active: 1,
+  });
 
   const loadUsers = async (page: number, limit: number, showLoading = true) => {
     if (showLoading) {
@@ -113,6 +124,14 @@ export default function UsersPage() {
     const timer = setTimeout(() => setResetSuccessUser(null), 4000);
     return () => clearTimeout(timer);
   }, [resetSuccessUser]);
+
+  useEffect(() => {
+    if (!editSuccessUser) {
+      return;
+    }
+    const timer = setTimeout(() => setEditSuccessUser(null), 4000);
+    return () => clearTimeout(timer);
+  }, [editSuccessUser]);
 
   const goToTypedPage = () => {
     const parsedPage = Number(pageInputValue);
@@ -267,6 +286,69 @@ export default function UsersPage() {
     }
   };
 
+  const openEditModal = (user: User) => {
+    setEditError(null);
+    setEditForm({
+      first_name: user.first_name ?? "",
+      last_name: user.last_name ?? "",
+      display_name: user.display_name ?? "",
+      user_email: user.user_email ?? "",
+      active: user.active ? 1 : 0,
+    });
+    setPendingEditUser(user);
+  };
+
+  const closeEditModal = () => {
+    setPendingEditUser(null);
+    setEditError(null);
+  };
+
+  const handleEditUser = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!pendingEditUser) {
+      return;
+    }
+
+    setEditError(null);
+
+    const targetName =
+      editForm.display_name.trim() ||
+      pendingEditUser.user_name ||
+      `#${pendingEditUser.id}`;
+
+    setIsSavingEdit(true);
+
+    try {
+      const payload = {
+        first_name: editForm.first_name.trim(),
+        last_name: editForm.last_name.trim(),
+        display_name: editForm.display_name.trim(),
+        user_email: editForm.user_email.trim(),
+        active: editForm.active,
+      };
+
+      const response = await fetch(`/api/users/${pendingEditUser.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update user");
+      }
+
+      closeEditModal();
+      setEditSuccessUser(targetName);
+      await loadUsers(currentPage, pageSize, false);
+    } catch {
+      setEditError("Could not save changes. Please try again.");
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   const firstEntryIndex = totalEntries === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const lastEntryIndex = Math.min(currentPage * pageSize, totalEntries);
   const canGoPrevious = currentPage > 1;
@@ -301,6 +383,19 @@ export default function UsersPage() {
           <button
             type="button"
             onClick={() => setResetSuccessUser(null)}
+            aria-label="Dismiss"
+            className="cursor-pointer rounded px-1 text-green-700 hover:text-green-900 dark:text-green-300 dark:hover:text-green-100"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      {editSuccessUser && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-800 dark:bg-green-900/40 dark:text-green-200">
+          <span>✅ Saved changes to “{editSuccessUser}”.</span>
+          <button
+            type="button"
+            onClick={() => setEditSuccessUser(null)}
             aria-label="Dismiss"
             className="cursor-pointer rounded px-1 text-green-700 hover:text-green-900 dark:text-green-300 dark:hover:text-green-100"
           >
@@ -370,6 +465,15 @@ export default function UsersPage() {
                     </td>
                     <td className="whitespace-nowrap px-4 py-2">
                       <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(user)}
+                          aria-label="Edit user"
+                          title="Edit user"
+                          className="cursor-pointer rounded px-2 py-1 text-base text-zinc-500 hover:text-sky-600 dark:text-zinc-400 dark:hover:text-sky-400"
+                        >
+                          ✏️
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
@@ -758,6 +862,125 @@ export default function UsersPage() {
                   className="cursor-pointer rounded bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isResettingPassword ? "Saving..." : "Reset Password"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {pendingEditUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-xl overflow-hidden rounded-lg bg-white shadow-xl dark:bg-zinc-900">
+            <div className="relative bg-gradient-to-r from-sky-600 to-cyan-600 px-5 py-3">
+              <h3 className="text-center text-lg font-semibold text-white">Edit User</h3>
+              <button
+                type="button"
+                onClick={closeEditModal}
+                disabled={isSavingEdit}
+                aria-label="Close edit user dialog"
+                className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-white/35 bg-white/15 text-sm leading-none text-white/95 backdrop-blur-sm transition hover:bg-white/25 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/60 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleEditUser} className="space-y-4 p-5">
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                Editing{" "}
+                <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                  {pendingEditUser.user_name ?? `#${pendingEditUser.id}`}
+                </span>
+                .
+              </p>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="space-y-1 text-sm sm:col-span-2">
+                  <span className="text-zinc-600 dark:text-zinc-300">Display Name</span>
+                  <input
+                    type="text"
+                    value={editForm.display_name}
+                    autoFocus
+                    onChange={(event) =>
+                      setEditForm((current) => ({ ...current, display_name: event.target.value }))
+                    }
+                    className="w-full rounded border border-zinc-300 px-2.5 py-2 text-zinc-800 focus:border-sky-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm sm:col-span-2">
+                  <span className="text-zinc-600 dark:text-zinc-300">Email</span>
+                  <input
+                    type="email"
+                    value={editForm.user_email}
+                    onChange={(event) =>
+                      setEditForm((current) => ({ ...current, user_email: event.target.value }))
+                    }
+                    className="w-full rounded border border-zinc-300 px-2.5 py-2 text-zinc-800 focus:border-sky-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span className="text-zinc-600 dark:text-zinc-300">First Name</span>
+                  <input
+                    type="text"
+                    value={editForm.first_name}
+                    onChange={(event) =>
+                      setEditForm((current) => ({ ...current, first_name: event.target.value }))
+                    }
+                    className="w-full rounded border border-zinc-300 px-2.5 py-2 text-zinc-800 focus:border-sky-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span className="text-zinc-600 dark:text-zinc-300">Last Name</span>
+                  <input
+                    type="text"
+                    value={editForm.last_name}
+                    onChange={(event) =>
+                      setEditForm((current) => ({ ...current, last_name: event.target.value }))
+                    }
+                    className="w-full rounded border border-zinc-300 px-2.5 py-2 text-zinc-800 focus:border-sky-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                  />
+                </label>
+
+                <label className="flex items-start gap-2 text-sm sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={editForm.active === 1}
+                    onChange={(event) =>
+                      setEditForm((current) => ({ ...current, active: event.target.checked ? 1 : 0 }))
+                    }
+                    className="mt-0.5 h-4 w-4 cursor-pointer rounded border-zinc-300 text-sky-600 focus:ring-sky-500"
+                  />
+                  <span className="text-zinc-600 dark:text-zinc-300">
+                    Active
+                    <span className="block text-xs text-zinc-400">
+                      Uncheck to disable this user’s sign-in without deleting the account.
+                    </span>
+                  </span>
+                </label>
+              </div>
+
+              {editError && (
+                <p className="text-sm text-red-600 dark:text-red-400">{editError}</p>
+              )}
+
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeEditModal}
+                  disabled={isSavingEdit}
+                  className="cursor-pointer rounded border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="cursor-pointer rounded bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSavingEdit ? "Saving..." : "Save Changes"}
                 </button>
               </div>
             </form>
