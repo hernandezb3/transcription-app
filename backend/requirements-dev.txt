@@ -3,3 +3,11 @@
 pytest
 pytest-cov
 pydantic>=2,<3
+
+# The user password/update tests import app.auth.security (bcrypt hashing + JWT),
+# which pulls in these runtime auth libs at import time. Pinned to match
+# app/requirements.txt so CI collects the tests instead of erroring out.
+# (passlib 1.7.x is incompatible with bcrypt >= 4.1, hence the pin.)
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt<4.1
