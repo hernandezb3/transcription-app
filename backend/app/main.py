@@ -28,6 +28,8 @@ from app.api_routers.security.user_group import router as user_group_router
 from app.api_routers.security.user_role import router as user_role_router
 from app.api_routers.security.group_role import router as group_role_router
 from app.api_routers.security.role_permission import router as role_permission_router
+# admin settings (OAuth provider config)
+from app.api_routers.oauth_settings import router as oauth_settings_router
 
 # settings and logging
 from app.config.app_settings import SettingsConfig
@@ -77,3 +79,5 @@ app.include_router(user_group_router, tags=["User Group Assignments"])
 app.include_router(user_role_router, tags=["User Role Assignments"])
 app.include_router(group_role_router, tags=["Group Role Assignments"])
 app.include_router(role_permission_router, tags=["Role Permission Assignments"])
+# admin settings
+app.include_router(oauth_settings_router, tags=["OAuth Settings"])

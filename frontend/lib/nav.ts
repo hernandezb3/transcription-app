@@ -26,6 +26,7 @@ export const navEntries: NavEntry[] = [
     children: [
       { label: "Lesson Subjects", href: "/metadata/lesson-subjects", requiredPermission: "settings.read" },
       { label: "Microphone Colors", href: "/metadata", requiredPermission: "settings.read" },
+      { label: "OAuth (Azure)", href: "/settings/oauth", requiredPermission: "settings.read" },
     ],
   },
   {

@@ -32,6 +32,30 @@ describe("navEntries — Users under Security (#3320)", () => {
   });
 });
 
+describe("navEntries — Azure OAuth settings under Administration (#3322)", () => {
+  it("has an OAuth (Azure) link to /settings/oauth gated on settings.read", () => {
+    const admin = findGroup(navEntries, "Administration");
+    expect(admin).toBeDefined();
+    const oauth = admin?.children.find((c) => c.href === "/settings/oauth");
+    expect(oauth).toBeDefined();
+    expect(oauth?.label).toBe("OAuth (Azure)");
+    expect(oauth?.requiredPermission).toBe("settings.read");
+  });
+
+  it("hides the OAuth (Azure) link when the user lacks settings.read", () => {
+    const filtered = filterNavEntries(navEntries, granting("users.read"));
+    const admin = findGroup(filtered, "Administration");
+    // No settings.read → the whole Administration group is gone.
+    expect(admin).toBeUndefined();
+  });
+
+  it("shows the OAuth (Azure) link when the user holds settings.read", () => {
+    const filtered = filterNavEntries(navEntries, granting("settings.read"));
+    const admin = findGroup(filtered, "Administration");
+    expect(admin?.children.some((c) => c.href === "/settings/oauth")).toBe(true);
+  });
+});
+
 describe("filterNavEntries — permission gating", () => {
   it("shows Users under Security when the user holds users.read", () => {
     const filtered = filterNavEntries(navEntries, granting("users.read"));
